@@ -11,7 +11,7 @@ const navItems = [
 ];
 
 const adminItems = [
-  { to: '/admin', label: 'Trustees', icon: Users },
+  { to: '/admin', label: 'Admin', icon: Users },
   { to: '/audit', label: 'Audit', icon: BarChart3 },
   { to: '/identity', label: 'Identity', icon: Fingerprint },
 ];
@@ -82,7 +82,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <p className="text-xs text-muted-foreground">Network</p>
               <div className="flex items-center gap-2 mt-1">
                 <div className="w-2 h-2 rounded-full bg-biochain-success animate-pulse" />
-                <span className="text-xs text-foreground">Polygon Mainnet</span>
+                <span className="text-xs text-foreground">Offline Local</span>
               </div>
             </div>
           </div>

@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Vote, ShieldCheck, BarChart3, Clock, Users, CheckCircle2, AlertCircle, ArrowRight, Fingerprint } from 'lucide-react';
+import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, CreditCard, Hash, Link2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
+import { localBlockchain } from '@/services/localBlockchain';
 import { useNavigate } from 'react-router-dom';
-import type { Election } from '@/store/useAppStore';
+import type { ElectionRecord } from '@/services/dbService';
 
 const statusConfig = {
   active: { label: 'Active', color: 'bg-biochain-success/20 text-biochain-success border-biochain-success/30' },
@@ -16,10 +17,68 @@ const statusConfig = {
   completed: { label: 'Completed', color: 'bg-muted-foreground/20 text-muted-foreground border-muted-foreground/30' },
 };
 
-function ElectionCard({ election, index }: { election: Election; index: number }) {
+function VoterInfoCard({ voter }: { voter: any }) {
+  const maskedAadhaar = voter.aadhaarNumber
+    ? `XXXX-XXXX-${voter.aadhaarNumber.slice(-4)}`
+    : 'N/A';
+
+  return (
+    <Card className="glass border-border/50 overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-white to-green-600 opacity-60" />
+      <CardContent className="p-5">
+        <div className="flex items-start gap-4">
+          <div className="w-16 h-16 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <User className="w-8 h-8 text-primary" />
+          </div>
+          <div className="flex-1 space-y-3">
+            <div>
+              <h3 className="text-lg font-display font-bold text-foreground">{voter.name}</h3>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Verified
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {voter.gender === 'male' ? '♂' : voter.gender === 'female' ? '♀' : '⚧'} {voter.gender}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Aadhaar: <span className="text-foreground font-mono">{maskedAadhaar}</span></span>
+              </div>
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Hash className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Voter ID: <span className="text-foreground font-mono">{voter.voterIdNumber}</span></span>
+              </div>
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>{voter.constituency}, {voter.district}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Link2 className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="text-foreground font-mono text-[10px] truncate">{voter.did}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ElectionCard({ election, index, votedElections }: { election: ElectionRecord; index: number; votedElections: Set<string> }) {
   const navigate = useNavigate();
-  const progress = election.totalVoters > 0 ? (election.votesCast / election.totalVoters) * 100 : 0;
+  const [voteCount, setVoteCount] = useState(0);
+
+  useEffect(() => {
+    apiService.getVoteCountByElection(election.id).then(setVoteCount);
+  }, [election.id]);
+
   const cfg = statusConfig[election.status];
+  const hasVoted = votedElections.has(election.id);
 
   return (
     <motion.div
@@ -38,26 +97,41 @@ function ElectionCard({ election, index }: { election: Election; index: number }
         <CardContent className="space-y-4">
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
-              <p className="text-lg font-bold text-foreground">{election.candidateCount}</p>
-              <p className="text-[10px] text-muted-foreground uppercase">Candidates</p>
+              <p className="text-lg font-bold text-foreground">{election.type.replace('-', ' ').toUpperCase().slice(0, 8)}</p>
+              <p className="text-[10px] text-muted-foreground uppercase">Type</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-foreground">{(election.votesCast / 1000).toFixed(0)}k</p>
+              <p className="text-lg font-bold text-foreground">{voteCount}</p>
               <p className="text-[10px] text-muted-foreground uppercase">Votes Cast</p>
             </div>
             <div>
-              <p className="text-lg font-bold text-foreground">{progress.toFixed(1)}%</p>
-              <p className="text-[10px] text-muted-foreground uppercase">Turnout</p>
+              <p className="text-lg font-bold text-foreground">{election.constituency.slice(0, 10)}</p>
+              <p className="text-[10px] text-muted-foreground uppercase">Constituency</p>
             </div>
           </div>
-          <Progress value={progress} className="h-1.5 bg-muted" />
-          {election.status === 'active' && (
+
+          {election.status === 'active' && !hasVoted && (
             <Button
               onClick={() => navigate('/vote')}
               className="w-full bg-primary hover:bg-primary/90"
               aria-label={`Cast vote for ${election.title}`}
             >
               Cast Your Vote <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          )}
+          {election.status === 'active' && hasVoted && (
+            <div className="flex items-center justify-center gap-2 py-2 text-biochain-success">
+              <CheckCircle2 className="w-4 h-4" />
+              <span className="text-sm font-medium">Vote Recorded</span>
+            </div>
+          )}
+          {election.status === 'completed' && (
+            <Button
+              variant="outline"
+              onClick={() => navigate('/audit')}
+              className="w-full"
+            >
+              View Results <BarChart3 className="w-4 h-4 ml-1" />
             </Button>
           )}
         </CardContent>
@@ -67,21 +141,39 @@ function ElectionCard({ election, index }: { election: Election; index: number }
 }
 
 const Dashboard = () => {
-  const { user, elections, setElections, voteReceipts } = useAppStore();
+  const { currentVoter, elections, setElections, voteReceipts } = useAppStore();
   const [loading, setLoading] = useState(true);
+  const [blockCount, setBlockCount] = useState(0);
+  const [chainValid, setChainValid] = useState(true);
+  const [votedElections, setVotedElections] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
 
   useEffect(() => {
-    apiService.getElections().then((data) => {
-      setElections(data);
-      setLoading(false);
-    });
-  }, [setElections]);
+    const load = async () => {
+      const allElections = await apiService.getElections();
+      setElections(allElections);
 
-  const container = {
-    hidden: {},
-    show: { transition: { staggerChildren: 0.1 } },
-  };
+      const count = await localBlockchain.getBlockCount();
+      setBlockCount(count);
+
+      const verification = await localBlockchain.verifyChain();
+      setChainValid(verification.valid);
+
+      // Check which elections the voter has already voted in
+      if (currentVoter) {
+        const voterVotes = await apiService.getVotesByVoter(currentVoter.id);
+        setVotedElections(new Set(voterVotes.map(v => v.electionId)));
+      }
+
+      setLoading(false);
+    };
+    load();
+  }, [setElections, currentVoter]);
+
+  // Filter elections relevant to the voter
+  const relevantElections = currentVoter
+    ? elections.filter(e => e.constituency === currentVoter.constituency || e.state === currentVoter.state)
+    : elections;
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-8">
@@ -92,20 +184,27 @@ const Dashboard = () => {
         className="space-y-1"
       >
         <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
-          Welcome back, <span className="text-gradient">{user?.name || 'Voter'}</span>
+          Welcome, <span className="text-gradient">{currentVoter?.name || 'Voter'}</span>
         </h1>
-        <p className="text-sm text-muted-foreground">Your secure voting dashboard</p>
+        <p className="text-sm text-muted-foreground">Your secure voting dashboard — {currentVoter?.state || 'India'}</p>
       </motion.div>
 
+      {/* Voter Info Card */}
+      {currentVoter && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <VoterInfoCard voter={currentVoter} />
+        </motion.div>
+      )}
+
       {/* Quick Actions */}
-      <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { icon: Vote, label: 'Cast Vote', to: '/vote', color: 'text-primary' },
           { icon: ShieldCheck, label: 'Verify Vote', to: '/verify', color: 'text-biochain-success' },
-          { icon: BarChart3, label: 'View Audit', to: '/audit', color: 'text-biochain-warning' },
+          { icon: BarChart3, label: 'Results', to: '/audit', color: 'text-biochain-warning' },
           { icon: Fingerprint, label: 'Identity', to: '/identity', color: 'text-biochain-cyber' },
         ].map((action, i) => (
-          <motion.div key={action.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+          <motion.div key={action.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.05 }}>
             <Button
               variant="outline"
               onClick={() => navigate(action.to)}
@@ -119,22 +218,29 @@ const Dashboard = () => {
         ))}
       </motion.div>
 
-      {/* Identity Status */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+      {/* Blockchain Status */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
         <Card className="glass border-border/50">
           <CardContent className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-biochain-success/10 flex items-center justify-center">
-                <CheckCircle2 className="w-5 h-5 text-biochain-success" />
+              <div className={`w-10 h-10 rounded-lg ${chainValid ? 'bg-biochain-success/10' : 'bg-destructive/10'} flex items-center justify-center`}>
+                {chainValid ? (
+                  <CheckCircle2 className="w-5 h-5 text-biochain-success" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-destructive" />
+                )}
               </div>
               <div>
-                <p className="text-sm font-medium text-foreground">Voter Identity Verified</p>
-                <p className="text-xs text-muted-foreground">DID: {user?.did || 'did:biochain:...'}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {chainValid ? 'Blockchain Verified ✓' : 'Chain Integrity Issue!'}
+                </p>
+                <p className="text-xs text-muted-foreground">{blockCount} blocks • SHA-256 linked • Tamper-proof</p>
               </div>
             </div>
-            <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30">
-              {user?.verificationLevel || 'Verified'}
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full ${chainValid ? 'bg-biochain-success' : 'bg-destructive'} animate-pulse`} />
+              <span className="text-xs text-foreground">Offline Secure</span>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
@@ -142,10 +248,10 @@ const Dashboard = () => {
       {/* Elections */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-display font-semibold text-foreground">Elections</h2>
+          <h2 className="text-lg font-display font-semibold text-foreground">Your Elections</h2>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
-            <span>Live updates</span>
+            <span>{relevantElections.length} election(s)</span>
           </div>
         </div>
 
@@ -155,10 +261,17 @@ const Dashboard = () => {
               <Card key={i} className="glass border-border/50 h-48 animate-pulse" />
             ))}
           </div>
+        ) : relevantElections.length === 0 ? (
+          <Card className="glass border-border/50">
+            <CardContent className="p-8 text-center">
+              <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No elections available for your constituency.</p>
+            </CardContent>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {elections.map((election, i) => (
-              <ElectionCard key={election.id} election={election} index={i} />
+            {relevantElections.map((election, i) => (
+              <ElectionCard key={election.id} election={election} index={i} votedElections={votedElections} />
             ))}
           </div>
         )}

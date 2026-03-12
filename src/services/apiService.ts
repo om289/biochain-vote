@@ -1,85 +1,210 @@
-// Mocked API Service — ready for real backend integration
+// API Service — IndexedDB-backed offline data layer for BioChain Vote
 
-import type { Election, Candidate, Trustee, User } from '@/store/useAppStore';
-
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+import { voterDB, electionDB, candidateDB, voteDB, adminDB, seedDemoData, type Voter, type ElectionRecord, type CandidateRecord, type VoteRecord } from './dbService';
+import { localBlockchain } from './localBlockchain';
 
 export const apiService = {
-  /** Login (mocked) */
-  async login(biometricToken: string): Promise<User> {
-    await delay(1000);
-    return {
-      id: 'user-001',
-      name: 'Alex Morgan',
-      email: 'alex.morgan@email.com',
-      did: 'did:biochain:a1b2c3d4e5f6...',
-      verificationLevel: 'verified',
-      biometricRegistered: true,
-      createdAt: '2025-06-01T00:00:00Z',
+  /** Initialize the database and seed demo data */
+  async initialize(): Promise<void> {
+    await seedDemoData();
+    await localBlockchain.initialize();
+
+    // Seed votes for completed election to have demo analytics
+    const existingVotes = await voteDB.getByElection('elec-004');
+    if (existingVotes.length === 0) {
+      // Simulate completed election votes
+      const demoVotes = [
+        { voterId: 'voter-003', candidateId: 'cand-008', count: 35 },
+        { voterId: 'voter-003', candidateId: 'cand-009', count: 28 },
+        { voterId: 'voter-003', candidateId: 'cand-010', count: 17 },
+      ];
+
+      for (const dv of demoVotes) {
+        for (let i = 0; i < dv.count; i++) {
+          const voteId = `vote-demo-${dv.candidateId}-${i}`;
+          const voterHash = await sha256Hash(`demo-voter-${dv.candidateId}-${i}`);
+
+          const block = await localBlockchain.recordVote({
+            voterId: `demo-voter-${i}`,
+            electionId: 'elec-004',
+            candidateId: dv.candidateId,
+            voterHash,
+          });
+
+          await voteDB.save({
+            id: voteId,
+            electionId: 'elec-004',
+            voterId: `demo-voter-${dv.candidateId}-${i}`,
+            candidateId: dv.candidateId,
+            blockHash: block.hash,
+            blockIndex: block.index,
+            timestamp: block.timestamp,
+          });
+        }
+      }
+    }
+  },
+
+  // ===== Voter Operations =====
+  async getVoters(): Promise<Voter[]> {
+    return voterDB.getAll();
+  },
+
+  async getVoterById(id: string): Promise<Voter | undefined> {
+    return voterDB.getById(id);
+  },
+
+  async saveVoter(voter: Voter): Promise<void> {
+    return voterDB.save(voter);
+  },
+
+  async deleteVoter(id: string): Promise<void> {
+    return voterDB.delete(id);
+  },
+
+  // ===== Election Operations =====
+  async getElections(): Promise<ElectionRecord[]> {
+    return electionDB.getAll();
+  },
+
+  async getElectionById(id: string): Promise<ElectionRecord | undefined> {
+    return electionDB.getById(id);
+  },
+
+  async getActiveElections(): Promise<ElectionRecord[]> {
+    return electionDB.getByStatus('active');
+  },
+
+  async getElectionsForVoter(voter: Voter): Promise<ElectionRecord[]> {
+    const all = await electionDB.getAll();
+    return all.filter(e => e.constituency === voter.constituency || e.state === voter.state);
+  },
+
+  async saveElection(election: ElectionRecord): Promise<void> {
+    return electionDB.save(election);
+  },
+
+  async deleteElection(id: string): Promise<void> {
+    return electionDB.delete(id);
+  },
+
+  // ===== Candidate Operations =====
+  async getCandidates(electionId: string): Promise<CandidateRecord[]> {
+    return candidateDB.getByElection(electionId);
+  },
+
+  async getAllCandidates(): Promise<CandidateRecord[]> {
+    return candidateDB.getAll();
+  },
+
+  async saveCandidate(candidate: CandidateRecord): Promise<void> {
+    return candidateDB.save(candidate);
+  },
+
+  async deleteCandidate(id: string): Promise<void> {
+    return candidateDB.delete(id);
+  },
+
+  // ===== Vote Operations =====
+  async hasVoted(electionId: string, voterId: string): Promise<boolean> {
+    return voteDB.hasVoted(electionId, voterId);
+  },
+
+  async castVote(electionId: string, voterId: string, candidateId: string): Promise<VoteRecord> {
+    // Check if already voted
+    const alreadyVoted = await voteDB.hasVoted(electionId, voterId);
+    if (alreadyVoted) {
+      throw new Error('You have already voted in this election. Double voting is not allowed.');
+    }
+
+    // Hash voter identity for privacy on the blockchain
+    const voterHash = await sha256Hash(`${voterId}:${electionId}:${Date.now()}`);
+
+    // Record on local blockchain
+    const block = await localBlockchain.recordVote({
+      voterId,
+      electionId,
+      candidateId,
+      voterHash,
+    });
+
+    // Save vote record
+    const vote: VoteRecord = {
+      id: crypto.randomUUID(),
+      electionId,
+      voterId,
+      candidateId,
+      blockHash: block.hash,
+      blockIndex: block.index,
+      timestamp: block.timestamp,
     };
+
+    await voteDB.save(vote);
+    return vote;
   },
 
-  /** Get elections (mocked) */
-  async getElections(): Promise<Election[]> {
-    await delay(600);
-    return [
-      {
-        id: 'elec-001',
-        title: '2026 Federal Election',
-        description: 'National presidential and parliamentary election.',
-        status: 'active',
-        startDate: '2026-02-10T00:00:00Z',
-        endDate: '2026-02-15T23:59:59Z',
-        candidateCount: 5,
-        totalVoters: 1_200_000,
-        votesCast: 487_320,
-      },
-      {
-        id: 'elec-002',
-        title: 'State Assembly Vote',
-        description: 'State-level assembly representative election.',
-        status: 'upcoming',
-        startDate: '2026-03-01T00:00:00Z',
-        endDate: '2026-03-05T23:59:59Z',
-        candidateCount: 8,
-        totalVoters: 350_000,
-        votesCast: 0,
-      },
-      {
-        id: 'elec-003',
-        title: '2025 Municipal Election',
-        description: 'City council and mayoral election.',
-        status: 'completed',
-        startDate: '2025-11-01T00:00:00Z',
-        endDate: '2025-11-05T23:59:59Z',
-        candidateCount: 12,
-        totalVoters: 85_000,
-        votesCast: 62_340,
-      },
-    ];
+  async getVotesByElection(electionId: string): Promise<VoteRecord[]> {
+    return voteDB.getByElection(electionId);
   },
 
-  /** Get candidates for an election (mocked) */
-  async getCandidates(electionId: string): Promise<Candidate[]> {
-    await delay(500);
-    return [
-      { id: 'c1', name: 'Sarah Chen', party: 'Progressive Alliance', platform: 'Digital infrastructure, green energy, education reform', photoUrl: '' },
-      { id: 'c2', name: 'James Okonkwo', party: 'Unity Front', platform: 'Economic growth, security, healthcare', photoUrl: '' },
-      { id: 'c3', name: 'Maria Gonzalez', party: 'People\'s Voice', platform: 'Social justice, housing, workers\' rights', photoUrl: '' },
-      { id: 'c4', name: 'David Kim', party: 'Innovation Party', platform: 'Technology, transparency, blockchain governance', photoUrl: '' },
-      { id: 'c5', name: 'Amara Osei', party: 'Independent', platform: 'Anti-corruption, civil liberties, decentralization', photoUrl: '' },
-    ];
+  async getVotesByVoter(voterId: string): Promise<VoteRecord[]> {
+    return voteDB.getByVoter(voterId);
   },
 
-  /** Get trustees (mocked) */
-  async getTrustees(): Promise<Trustee[]> {
-    await delay(500);
-    return [
-      { id: 't1', name: 'Dr. Elena Vasquez', keyShareSubmitted: true, submittedAt: '2026-02-12T10:30:00Z' },
-      { id: 't2', name: 'Prof. Hiroshi Tanaka', keyShareSubmitted: true, submittedAt: '2026-02-12T11:15:00Z' },
-      { id: 't3', name: 'Justice Amina Diallo', keyShareSubmitted: true, submittedAt: '2026-02-12T12:00:00Z' },
-      { id: 't4', name: 'Cmdr. Robert Hale', keyShareSubmitted: false },
-      { id: 't5', name: 'Dr. Priya Sharma', keyShareSubmitted: false },
-    ];
+  async getVoteCountByElection(electionId: string): Promise<number> {
+    return voteDB.countByElection(electionId);
+  },
+
+  /** Get election results with candidate vote counts */
+  async getElectionResults(electionId: string): Promise<{
+    candidate: CandidateRecord;
+    voteCount: number;
+    percentage: number;
+  }[]> {
+    const candidates = await candidateDB.getByElection(electionId);
+    const votes = await voteDB.getByElection(electionId);
+    const totalVotes = votes.length;
+
+    const results = candidates.map(candidate => {
+      const voteCount = votes.filter(v => v.candidateId === candidate.id).length;
+      return {
+        candidate,
+        voteCount,
+        percentage: totalVotes > 0 ? (voteCount / totalVotes) * 100 : 0,
+      };
+    });
+
+    return results.sort((a, b) => b.voteCount - a.voteCount);
+  },
+
+  // ===== Admin Operations =====
+  async verifyAdminPin(pin: string): Promise<boolean> {
+    return adminDB.verifyPin(pin);
+  },
+
+  // ===== Blockchain Operations =====
+  async verifyBlockchain() {
+    return localBlockchain.verifyChain();
+  },
+
+  async getBlockchain() {
+    return localBlockchain.getChain();
+  },
+
+  async getBlockByHash(hash: string) {
+    return localBlockchain.getBlockByHash(hash);
+  },
+
+  async getBlockCount() {
+    return localBlockchain.getBlockCount();
   },
 };
+
+// Helper: SHA-256 hash
+async function sha256Hash(message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}

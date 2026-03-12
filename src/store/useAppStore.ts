@@ -1,97 +1,75 @@
 // Zustand store for BioChain Vote global state
 import { create } from 'zustand';
+import type { Voter, ElectionRecord, CandidateRecord, VoteRecord } from '@/services/dbService';
 
-// Types
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  did: string; // Decentralized Identifier
-  verificationLevel: 'basic' | 'verified' | 'full';
-  biometricRegistered: boolean;
-  createdAt: string;
-}
-
-export interface Election {
-  id: string;
-  title: string;
-  description: string;
-  status: 'upcoming' | 'active' | 'completed';
-  startDate: string;
-  endDate: string;
-  candidateCount: number;
-  totalVoters: number;
-  votesCast: number;
-}
-
-export interface Candidate {
-  id: string;
-  name: string;
-  party: string;
-  platform: string;
-  photoUrl: string;
-}
+// Re-export DB types for convenience
+export type { Voter, ElectionRecord, CandidateRecord, VoteRecord };
 
 export interface VoteReceipt {
   id: string;
   electionId: string;
   electionTitle: string;
+  candidateId: string;
+  candidateName: string;
   transactionHash: string;
   blockNumber: number;
   timestamp: string;
   status: 'confirmed' | 'pending' | 'failed';
-  zkProofId: string;
-}
-
-export interface Trustee {
-  id: string;
-  name: string;
-  keyShareSubmitted: boolean;
-  submittedAt?: string;
 }
 
 export interface WalletState {
   connected: boolean;
   address: string | null;
   chainId: number | null;
-  provider: string | null; // 'metamask' | 'trustwallet' | null
+  provider: string | null;
 }
 
 interface AppState {
   // Auth
   isAuthenticated: boolean;
-  user: User | null;
-  setUser: (user: User | null) => void;
+  isAdmin: boolean;
+  currentVoter: Voter | null;
+  setCurrentVoter: (voter: Voter | null) => void;
   setAuthenticated: (auth: boolean) => void;
+  setAdmin: (isAdmin: boolean) => void;
 
   // Wallet
   wallet: WalletState;
   setWallet: (wallet: Partial<WalletState>) => void;
 
-  // Elections
-  elections: Election[];
-  setElections: (elections: Election[]) => void;
+  // Elections (cached in memory from IndexedDB)
+  elections: ElectionRecord[];
+  setElections: (elections: ElectionRecord[]) => void;
+
+  // current election context
+  currentElectionId: string | null;
+  setCurrentElectionId: (id: string | null) => void;
 
   // Vote history
   voteReceipts: VoteReceipt[];
   addVoteReceipt: (receipt: VoteReceipt) => void;
-
-  // Trustees
-  trustees: Trustee[];
-  setTrustees: (trustees: Trustee[]) => void;
-  updateTrustee: (id: string, update: Partial<Trustee>) => void;
+  setVoteReceipts: (receipts: VoteReceipt[]) => void;
 
   // UI
   currentTheme: 'dark' | 'light';
   toggleTheme: () => void;
+
+  // DB initialized flag
+  dbInitialized: boolean;
+  setDbInitialized: (init: boolean) => void;
+
+  // Logout
+  logout: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
   // Auth
   isAuthenticated: false,
-  user: null,
-  setUser: (user) => set({ user }),
+  isAdmin: false,
+  currentVoter: null,
+  setCurrentVoter: (currentVoter) => set({ currentVoter }),
   setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+  setAdmin: (isAdmin) => set({ isAdmin }),
 
   // Wallet
   wallet: { connected: false, address: null, chainId: null, provider: null },
@@ -101,18 +79,29 @@ export const useAppStore = create<AppState>((set) => ({
   elections: [],
   setElections: (elections) => set({ elections }),
 
+  // Current election
+  currentElectionId: null,
+  setCurrentElectionId: (currentElectionId) => set({ currentElectionId }),
+
   // Vote history
   voteReceipts: [],
   addVoteReceipt: (receipt) => set((state) => ({ voteReceipts: [...state.voteReceipts, receipt] })),
-
-  // Trustees
-  trustees: [],
-  setTrustees: (trustees) => set({ trustees }),
-  updateTrustee: (id, update) => set((state) => ({
-    trustees: state.trustees.map((t) => (t.id === id ? { ...t, ...update } : t)),
-  })),
+  setVoteReceipts: (voteReceipts) => set({ voteReceipts }),
 
   // UI
   currentTheme: 'dark',
   toggleTheme: () => set((state) => ({ currentTheme: state.currentTheme === 'dark' ? 'light' : 'dark' })),
+
+  // DB
+  dbInitialized: false,
+  setDbInitialized: (dbInitialized) => set({ dbInitialized }),
+
+  // Logout
+  logout: () => set({
+    isAuthenticated: false,
+    isAdmin: false,
+    currentVoter: null,
+    voteReceipts: [],
+    currentElectionId: null,
+  }),
 }));
