@@ -72,7 +72,7 @@ export default function VotePage() {
       }
 
       // Cast the vote
-      const vote = await apiService.castVote(selectedElection.id, currentVoter.id, selectedCandidate.id);
+      const vote = await apiService.castVote(selectedElection.id, currentVoter.id, selectedCandidate.id, selectedCandidate.name);
 
       setVoteResult({ blockHash: vote.blockHash, blockIndex: vote.blockIndex });
 
