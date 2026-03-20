@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, CreditCard, Hash, Link2 } from 'lucide-react';
+import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, Hash } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,10 +18,6 @@ const statusConfig = {
 };
 
 function VoterInfoCard({ voter }: { voter: any }) {
-  const maskedAadhaar = voter.aadhaarNumber
-    ? `XXXX-XXXX-${voter.aadhaarNumber.slice(-4)}`
-    : 'N/A';
-
   return (
     <Card className="glass border-border/50 overflow-hidden">
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-white to-green-600 opacity-60" />
@@ -36,30 +32,28 @@ function VoterInfoCard({ voter }: { voter: any }) {
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
                   <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Verified
+                  Biometric Verified
                 </Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  {voter.gender === 'male' ? '♂' : voter.gender === 'female' ? '♀' : '⚧'} {voter.gender}
-                </Badge>
+                {voter.hasVoted && (
+                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
+                    <Vote className="w-3 h-3 mr-1" />
+                    Voted
+                  </Badge>
+                )}
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <CreditCard className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Aadhaar: <span className="text-foreground font-mono">{maskedAadhaar}</span></span>
-              </div>
-              <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Hash className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Voter ID: <span className="text-foreground font-mono">{voter.voterIdNumber}</span></span>
+                <span>Voter ID: <span className="text-foreground font-mono">{voter.voterIdNumber || 'N/A'}</span></span>
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>{voter.constituency}, {voter.district}</span>
+                <span>{voter.constituency || 'Unknown'}</span>
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Link2 className="w-3.5 h-3.5 flex-shrink-0" />
-                <span className="text-foreground font-mono text-[10px] truncate">{voter.did}</span>
+                <Fingerprint className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>{voter.fingerprint ? 'Fingerprint enrolled ✓' : 'No fingerprint yet'}</span>
               </div>
             </div>
           </div>

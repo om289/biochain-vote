@@ -4,44 +4,18 @@ import { voterDB, electionDB, candidateDB, voteDB, adminDB, seedDemoData, type V
 import { localBlockchain } from './localBlockchain';
 
 export const apiService = {
-  /** Initialize the database and seed demo data */
+  /**
+   * Initialize local IndexedDB stores (elections, candidates, admin PIN).
+   * Voters and votes are managed by Supabase — no seeding needed here.
+   */
   async initialize(): Promise<void> {
-    await seedDemoData();
-    await localBlockchain.initialize();
-
-    // Seed votes for completed election to have demo analytics
-    const existingVotes = await voteDB.getByElection('elec-004');
-    if (existingVotes.length === 0) {
-      // Simulate completed election votes
-      const demoVotes = [
-        { voterId: 'voter-003', candidateId: 'cand-008', count: 35 },
-        { voterId: 'voter-003', candidateId: 'cand-009', count: 28 },
-        { voterId: 'voter-003', candidateId: 'cand-010', count: 17 },
-      ];
-
-      for (const dv of demoVotes) {
-        for (let i = 0; i < dv.count; i++) {
-          const voteId = `vote-demo-${dv.candidateId}-${i}`;
-          const voterHash = await sha256Hash(`demo-voter-${dv.candidateId}-${i}`);
-
-          const block = await localBlockchain.recordVote({
-            voterId: `demo-voter-${i}`,
-            electionId: 'elec-004',
-            candidateId: dv.candidateId,
-            voterHash,
-          });
-
-          await voteDB.save({
-            id: voteId,
-            electionId: 'elec-004',
-            voterId: `demo-voter-${dv.candidateId}-${i}`,
-            candidateId: dv.candidateId,
-            blockHash: block.hash,
-            blockIndex: block.index,
-            timestamp: block.timestamp,
-          });
-        }
-      }
+    try {
+      // Seed elections, candidates, admin PIN into IndexedDB (local-only data)
+      await seedDemoData();
+      // Init blockchain (local)
+      await localBlockchain.initialize();
+    } catch (e) {
+      console.warn('[apiService] initialize error (non-fatal):', e);
     }
   },
 
@@ -110,36 +84,38 @@ export const apiService = {
     return voteDB.hasVoted(electionId, voterId);
   },
 
-  async castVote(electionId: string, voterId: string, candidateId: string): Promise<VoteRecord> {
-    // Check if already voted
-    const alreadyVoted = await voteDB.hasVoted(electionId, voterId);
+  async castVote(electionId: string, voterId: string, candidateId: string, candidateName?: string): Promise<VoteRecord> {
+    // Check if already voted via Supabase voters.has_voted
+    const alreadyVoted = await voterDB.hasVoted(voterId);
     if (alreadyVoted) {
-      throw new Error('You have already voted in this election. Double voting is not allowed.');
+      throw new Error('You have already voted. Double voting is not allowed.');
     }
 
-    // Hash voter identity for privacy on the blockchain
+    // Build the vote record
+    const voteId = crypto.randomUUID();
+    const timestamp = new Date().toISOString();
+
+    // Also record on local blockchain for the receipt UI
     const voterHash = await sha256Hash(`${voterId}:${electionId}:${Date.now()}`);
+    const block = await localBlockchain.recordVote({ voterId, electionId, candidateId, voterHash });
 
-    // Record on local blockchain
-    const block = await localBlockchain.recordVote({
-      voterId,
-      electionId,
-      candidateId,
-      voterHash,
-    });
-
-    // Save vote record
     const vote: VoteRecord = {
-      id: crypto.randomUUID(),
+      id: voteId,
       electionId,
       voterId,
       candidateId,
       blockHash: block.hash,
       blockIndex: block.index,
-      timestamp: block.timestamp,
+      timestamp,
     };
 
-    await voteDB.save(vote);
+    // Save to Supabase votes table — store candidateName for readability
+    const voteForSupabase = { ...vote, candidateId: candidateName || candidateId };
+    await voteDB.save(voteForSupabase);
+
+    // Mark voter as voted in Supabase (prevents double voting)
+    await voterDB.markVoted(voterId);
+
     return vote;
   },
 

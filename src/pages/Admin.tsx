@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Label } from '@/components/ui/label';
 import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
-import { biometricService } from '@/services/biometricService';
+import { fingerprintEnroll, isFingerprintServiceAvailable } from '@/services/biometricService';
 import { useNavigate } from 'react-router-dom';
 import type { Voter, ElectionRecord, CandidateRecord } from '@/services/dbService';
 
@@ -118,8 +118,9 @@ function VoterManager() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editVoter, setEditVoter] = useState<Voter | null>(null);
   const [loading, setLoading] = useState(true);
-  const [touchIdAvailable, setTouchIdAvailable] = useState(false);
+  const [scannerAvailable, setScannerAvailable] = useState<boolean | null>(null);
   const [registeringFor, setRegisteringFor] = useState<string | null>(null);
+  const [enrollStatus, setEnrollStatus] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
 
   const load = async () => {
     const data = await apiService.getVoters();
@@ -129,14 +130,13 @@ function VoterManager() {
 
   useEffect(() => {
     load();
-    biometricService.isPlatformAuthenticatorAvailable().then(setTouchIdAvailable);
+    isFingerprintServiceAvailable().then(setScannerAvailable);
   }, []);
 
   const filtered = voters.filter(v =>
     v.name.toLowerCase().includes(search.toLowerCase()) ||
-    v.aadhaarNumber.includes(search) ||
-    v.voterIdNumber.toLowerCase().includes(search.toLowerCase()) ||
-    v.constituency.toLowerCase().includes(search.toLowerCase())
+    (v.voterIdNumber || '').toLowerCase().includes(search.toLowerCase()) ||
+    (v.constituency || '').toLowerCase().includes(search.toLowerCase())
   );
 
   const handleDelete = async (id: string) => {
@@ -154,25 +154,27 @@ function VoterManager() {
     setDialogOpen(true);
   };
 
-  /** Register a fingerprint for a voter — triggers Touch ID and saves a biometric template hash */
+  /** Register a fingerprint for a voter via the NITGEN scanner */
   const handleRegisterFingerprint = async (voter: Voter) => {
     setRegisteringFor(voter.id);
-    const result = await biometricService.verifyWithTouchID();
+    setEnrollStatus({ id: voter.id, msg: 'Place finger on scanner...', ok: true });
+    const result = await fingerprintEnroll(voter.id);
     if (result.success) {
-      // Generate a unique biometric template hash (simulates real fingerprint template storage)
-      const encoder = new TextEncoder();
-      const data = encoder.encode(`${voter.id}:${voter.aadhaarNumber}:${Date.now()}`);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const templateHash = 'bio:' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-      await apiService.saveVoter({ ...voter, fingerprint: templateHash });
+      // Flask already saved the real NITGEN: template directly to Supabase — do NOT overwrite it here.
+      // Just reload to show the updated fingerprint status.
+      setEnrollStatus({ id: voter.id, msg: result.simulated ? '✓ Enrolled (simulated)' : '✓ Fingerprint enrolled!', ok: true });
+    } else {
+      setEnrollStatus({ id: voter.id, msg: result.error || 'Enrollment failed.', ok: false });
     }
     setRegisteringFor(null);
+    setTimeout(() => setEnrollStatus(null), 4000);
     load();
   };
 
-  /** Check if a voter has a registered biometric fingerprint */
-  const hasRegisteredFingerprint = (voter: Voter) => voter.fingerprint.startsWith('bio:');
+
+  /** Check if a voter has a real enrolled fingerprint from the NITGEN scanner */
+  const hasRegisteredFingerprint = (voter: Voter) =>
+    !!(voter.fingerprint && voter.fingerprint.startsWith('NITGEN:'));
 
   return (
     <div className="space-y-4">
@@ -196,17 +198,19 @@ function VoterManager() {
                 <div className="flex-1">
                   <p className="font-medium text-foreground">{voter.name}</p>
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
-                    <span>Aadhaar: XXXX-XXXX-{voter.aadhaarNumber.slice(-4)}</span>
-                    <span>Voter ID: {voter.voterIdNumber}</span>
-                    <span>{voter.constituency}, {voter.state}</span>
-                    <span>{voter.gender}</span>
+                    <span>Voter ID: {voter.voterIdNumber || 'N/A'}</span>
+                    <span>{voter.constituency || 'No constituency'}</span>
+                    <span className="text-[10px]">{voter.fingerprint ? '🟢 Fingerprint enrolled' : '🔴 No fingerprint'}</span>
                   </div>
                   {hasRegisteredFingerprint(voter) && (
-                    <p className="text-[10px] text-biochain-success mt-1">✓ Fingerprint registered • Template: {voter.fingerprint.slice(4, 20)}...</p>
+                    <p className="text-[10px] text-biochain-success mt-1">✓ Fingerprint enrolled</p>
+                  )}
+                  {enrollStatus?.id === voter.id && (
+                    <p className={`text-[10px] mt-1 ${enrollStatus.ok ? 'text-biochain-success' : 'text-destructive'}`}>{enrollStatus.msg}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {touchIdAvailable && (
+                  {scannerAvailable !== false && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -218,9 +222,9 @@ function VoterManager() {
                         }`}
                     >
                       {registeringFor === voter.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning...</>
                       ) : (
-                        <><Fingerprint className="w-3.5 h-3.5 mr-1" /> {hasRegisteredFingerprint(voter) ? 'Re-scan' : 'Register Fingerprint'}</>
+                        <><Fingerprint className="w-3.5 h-3.5 mr-1" /> {hasRegisteredFingerprint(voter) ? 'Re-enroll' : 'Enroll Fingerprint'}</>
                       )}
                     </Button>
                   )}
@@ -246,31 +250,29 @@ function VoterManager() {
 }
 
 function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose: () => void; voter: Voter | null; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    name: '', aadhaarNumber: '', voterIdNumber: '', dateOfBirth: '', gender: 'male' as 'male' | 'female' | 'other',
-    constituency: '', district: '', state: '',
-  });
+  const [form, setForm] = useState({ name: '', voterIdNumber: '', constituency: '' });
 
   useEffect(() => {
     if (voter) {
       setForm({
-        name: voter.name, aadhaarNumber: voter.aadhaarNumber, voterIdNumber: voter.voterIdNumber,
-        dateOfBirth: voter.dateOfBirth, gender: voter.gender, constituency: voter.constituency,
-        district: voter.district, state: voter.state,
+        name: voter.name,
+        voterIdNumber: voter.voterIdNumber || '',
+        constituency: voter.constituency || '',
       });
     } else {
-      setForm({ name: '', aadhaarNumber: '', voterIdNumber: '', dateOfBirth: '', gender: 'male', constituency: '', district: '', state: '' });
+      setForm({ name: '', voterIdNumber: '', constituency: '' });
     }
   }, [voter, open]);
 
   const handleSave = async () => {
+    if (!form.name.trim()) return;
     const data: Voter = {
-      id: voter?.id || `voter-${Date.now()}`,
-      ...form,
-      photoUrl: voter?.photoUrl || '',
-      fingerprint: voter?.fingerprint || `fp-${form.name.toLowerCase().split(' ')[0]}-${Date.now()}`,
-      did: voter?.did || `did:biochain:${crypto.randomUUID().slice(0, 12)}`,
-      registeredAt: voter?.registeredAt || new Date().toISOString(),
+      id: voter?.id || crypto.randomUUID(),
+      name: form.name.trim(),
+      voterIdNumber: form.voterIdNumber.trim(),
+      constituency: form.constituency.trim(),
+      fingerprint: voter?.fingerprint || '',
+      hasVoted: voter?.hasVoted || false,
     };
     await apiService.saveVoter(data);
     onSaved();
@@ -282,41 +284,44 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
       <DialogContent className="max-w-md bg-card border-border">
         <DialogHeader>
           <DialogTitle>{voter ? 'Edit Voter' : 'Add New Voter'}</DialogTitle>
-          <DialogDescription>Fill in the voter's details below.</DialogDescription>
+          <DialogDescription>
+            {voter ? 'Update voter details in Supabase.' : 'This will add the voter to the Supabase voters table.'}
+          </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <div><Label>Full Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Aadhaar Number</Label><Input value={form.aadhaarNumber} onChange={e => setForm({ ...form, aadhaarNumber: e.target.value })} maxLength={12} /></div>
-            <div><Label>Voter ID</Label><Input value={form.voterIdNumber} onChange={e => setForm({ ...form, voterIdNumber: e.target.value })} /></div>
+          <div>
+            <Label>Full Name *</Label>
+            <Input
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Rajesh Kumar"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Date of Birth</Label><Input type="date" value={form.dateOfBirth} onChange={e => setForm({ ...form, dateOfBirth: e.target.value })} /></div>
-            <div>
-              <Label>Gender</Label>
-              <Select value={form.gender} onValueChange={v => setForm({ ...form, gender: v as any })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="male">Male</SelectItem>
-                  <SelectItem value="female">Female</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div>
+            <Label>Voter ID Number</Label>
+            <Input
+              value={form.voterIdNumber}
+              onChange={e => setForm({ ...form, voterIdNumber: e.target.value })}
+              placeholder="e.g. DL/04/001/123456"
+            />
           </div>
-          <div><Label>Constituency</Label><Input value={form.constituency} onChange={e => setForm({ ...form, constituency: e.target.value })} /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>District</Label><Input value={form.district} onChange={e => setForm({ ...form, district: e.target.value })} /></div>
-            <div><Label>State</Label><Input value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} /></div>
+          <div>
+            <Label>Constituency (Location)</Label>
+            <Input
+              value={form.constituency}
+              onChange={e => setForm({ ...form, constituency: e.target.value })}
+              placeholder="e.g. New Delhi"
+            />
           </div>
-          <Button onClick={handleSave} className="w-full bg-primary mt-2">
-            <Save className="w-4 h-4 mr-1" /> {voter ? 'Update' : 'Register'} Voter
+          <Button onClick={handleSave} className="w-full bg-primary mt-2" disabled={!form.name.trim()}>
+            <Save className="w-4 h-4 mr-1" /> {voter ? 'Update' : 'Add to Supabase'}
           </Button>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
+
 
 // ====== ELECTION MANAGER ======
 

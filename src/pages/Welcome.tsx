@@ -1,21 +1,19 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShieldCheck, Fingerprint, KeyRound, ArrowRight, Users, Loader2, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Fingerprint, Users, Loader2, CheckCircle2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { biometricService } from '@/services/biometricService';
+import { fingerprintVerify } from '@/services/biometricService';
 import { apiService } from '@/services/apiService';
 
-type Screen = 'welcome' | 'voter-select' | 'touchid-verify' | 'pin' | 'admin-pin';
+type Screen = 'welcome' | 'voter-select' | 'touchid-verify' | 'admin-pin';
 
 const Welcome = () => {
   const navigate = useNavigate();
   const { setCurrentVoter, setAuthenticated, setAdmin, dbInitialized, setDbInitialized } = useAppStore();
   const [screen, setScreen] = useState<Screen>('welcome');
-  const [scanning, setScanning] = useState(false);
-  const [pin, setPin] = useState('');
   const [adminPin, setAdminPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,16 +22,25 @@ const Welcome = () => {
   const [selectedVoter, setSelectedVoter] = useState<any>(null);
   const [touchIdStatus, setTouchIdStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
 
-  // Initialize DB on mount and check Touch ID availability
   useEffect(() => {
     const init = async () => {
-      if (!dbInitialized) {
-        await apiService.initialize();
-        setDbInitialized(true);
+      try {
+        if (!dbInitialized) {
+          await apiService.initialize();
+          setDbInitialized(true);
+        }
+        // Check if the physical Nitgen fingerprint service is running
+        try {
+          const res = await fetch('http://127.0.0.1:5000/status', { signal: AbortSignal.timeout(2000) });
+          setTouchIdAvailable(res.ok);
+        } catch {
+          setTouchIdAvailable(false);
+        }
+      } catch (err) {
+        console.warn('[Welcome] Init error (non-fatal):', err);
+      } finally {
+        setLoading(false);
       }
-      const hasTouchId = await biometricService.isPlatformAuthenticatorAvailable();
-      setTouchIdAvailable(hasTouchId);
-      setLoading(false);
     };
     init();
   }, [dbInitialized, setDbInitialized]);
@@ -45,16 +52,12 @@ const Welcome = () => {
     setScreen('voter-select');
   };
 
-  /** Voter selected — go to Touch ID verification */
+  /** Voter selected — always require fingerprint verification */
   const handleVoterChosen = (voter: any) => {
     setSelectedVoter(voter);
-    if (touchIdAvailable) {
-      setScreen('touchid-verify');
-      setTouchIdStatus('idle');
-    } else {
-      // No Touch ID — go straight in (simulated)
-      completeLogin(voter);
-    }
+    setScreen('touchid-verify');
+    setTouchIdStatus('idle');
+    setPinError('');
   };
 
   /** Complete login */
@@ -65,41 +68,21 @@ const Welcome = () => {
     navigate('/dashboard');
   };
 
-  /** Trigger Touch ID and login */
+  /** Trigger fingerprint scan and login */
   const handleTouchIdVerify = async () => {
     if (!selectedVoter) return;
     setTouchIdStatus('scanning');
 
-    const result = await biometricService.verifyWithTouchID();
+    const result = await fingerprintVerify(selectedVoter.id);
 
-    if (result.success) {
+    if (result.match) {
       setTouchIdStatus('success');
       // Brief pause to show success animation
       await new Promise(r => setTimeout(r, 600));
       completeLogin(selectedVoter);
     } else {
       setTouchIdStatus('failed');
-      setPinError(result.error || 'Touch ID verification failed.');
-    }
-  };
-
-  /** PIN submit */
-  const handlePinSubmit = async () => {
-    if (pin.length < 4) {
-      setPinError('PIN must be at least 4 digits');
-      return;
-    }
-    const result = await biometricService.verifyPin(pin);
-    if (result.success && result.voter) {
-      if (touchIdAvailable) {
-        setSelectedVoter(result.voter);
-        setScreen('touchid-verify');
-        setTouchIdStatus('idle');
-      } else {
-        completeLogin(result.voter);
-      }
-    } else {
-      setPinError(result.error || 'Invalid PIN');
+      setPinError(result.error || 'Fingerprint did not match. Please try again or use PIN.');
     }
   };
 
@@ -203,15 +186,6 @@ const Welcome = () => {
                 >
                   <Fingerprint className="w-5 h-5 mr-2" />
                   {touchIdAvailable ? 'Select Voter & Verify with Touch ID' : 'Select Voter & Login'}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setScreen('pin')}
-                  className="w-full h-12 text-base border-border"
-                  aria-label="Use PIN instead"
-                >
-                  <KeyRound className="w-5 h-5 mr-2" />
-                  Use PIN Instead
                 </Button>
                 <Button
                   variant="ghost"
@@ -362,14 +336,6 @@ const Welcome = () => {
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={() => { setScreen('pin'); setPinError(''); }}
-                  disabled={touchIdStatus === 'scanning'}
-                  className="text-muted-foreground"
-                >
-                  Use PIN fallback instead
-                </Button>
-                <Button
-                  variant="ghost"
                   onClick={() => { setScreen('voter-select'); setPinError(''); setTouchIdStatus('idle'); }}
                   disabled={touchIdStatus === 'scanning'}
                   className="text-muted-foreground"
@@ -380,46 +346,6 @@ const Welcome = () => {
             </motion.div>
           )}
 
-          {/* ── PIN Screen ── */}
-          {screen === 'pin' && (
-            <motion.div
-              key="pin"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="text-center space-y-6"
-            >
-              <div className="mx-auto w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center">
-                <KeyRound className="w-8 h-8 text-primary" />
-              </div>
-              <h2 className="text-2xl font-display font-bold text-foreground">Enter PIN</h2>
-              <p className="text-sm text-muted-foreground">Enter the last 4 digits of your Aadhaar number</p>
-
-              <div className="max-w-[200px] mx-auto">
-                <Input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={pin}
-                  onChange={(e) => { setPin(e.target.value); setPinError(''); }}
-                  placeholder="••••"
-                  className="text-center text-2xl tracking-[0.5em] h-14 bg-card border-border"
-                  aria-label="PIN input"
-                />
-                {pinError && <p className="text-destructive text-xs mt-2">{pinError}</p>}
-              </div>
-
-              <div className="space-y-3">
-                <Button onClick={handlePinSubmit} className="w-full h-12 bg-primary">
-                  Continue
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-                <Button variant="ghost" onClick={() => { setScreen('welcome'); setPinError(''); }} className="text-muted-foreground">
-                  Back to home
-                </Button>
-              </div>
-            </motion.div>
-          )}
 
           {/* ── Admin PIN Screen ── */}
           {screen === 'admin-pin' && (
