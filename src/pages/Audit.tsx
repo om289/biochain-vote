@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { BarChart3, PieChart as PieChartIcon, Trophy, Users, TrendingUp, CheckCircle2, AlertCircle, Hash, Loader2 } from 'lucide-react';
+import { BarChart3, PieChart as PieChartIcon, Trophy, Users, TrendingUp, CheckCircle2, AlertCircle, Hash, Loader2, Lock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiService } from '@/services/apiService';
 import { localBlockchain } from '@/services/localBlockchain';
+import { useAppStore } from '@/store/useAppStore';
 import type { ElectionRecord, CandidateRecord } from '@/services/dbService';
 import type { Block } from '@/services/localBlockchain';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -13,6 +15,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
 const COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
 export default function AuditPage() {
+  const { isAdmin } = useAppStore();
   const [elections, setElections] = useState<ElectionRecord[]>([]);
   const [selectedElectionId, setSelectedElectionId] = useState<string>('');
   const [results, setResults] = useState<{ candidate: CandidateRecord; voteCount: number; percentage: number }[]>([]);
@@ -79,6 +82,21 @@ export default function AuditPage() {
     return (
       <div className="p-4 md:p-8 max-w-6xl mx-auto flex justify-center py-20">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="p-4 md:p-8 max-w-4xl mx-auto text-center py-20 space-y-4">
+        <Lock className="w-12 h-12 text-destructive mx-auto" />
+        <h1 className="text-2xl font-display font-bold text-foreground">Access Denied</h1>
+        <p className="text-muted-foreground max-w-md mx-auto">
+          The election audit dashboard contains sensitive administrative data and is restricted to Election Officers only.
+        </p>
+        <Button onClick={() => window.location.href = '/dashboard'} variant="outline" className="mt-4">
+          Return to Dashboard
+        </Button>
       </div>
     );
   }

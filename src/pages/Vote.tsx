@@ -25,15 +25,49 @@ export default function VotePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [voteResult, setVoteResult] = useState<{ blockHash: string; blockIndex: number } | null>(null);
+  const [assignedBooth, setAssignedBooth] = useState<{ booth_id: string; assigned: boolean } | null>(null);
+
+  const FLASK_URL = `http://${window.location.hostname}:5000`;
 
   useEffect(() => {
     const load = async () => {
       if (!currentVoter) return;
+      
+      // 1. Fetch voter's assigned booth
+      let boothAssigned = false;
+      let boothId = null;
+      let boothElections: string[] = [];
+      try {
+        const boothRes = await fetch(`${FLASK_URL}/api/voter/${currentVoter.id}/booth`);
+        const boothData = await boothRes.json();
+        setAssignedBooth(boothData);
+        boothAssigned = boothData.assigned;
+        boothId = boothData.booth_id;
+
+        // 2. Fetch elections for that booth
+        if (boothAssigned && boothId) {
+            const elecRes = await fetch(`${FLASK_URL}/api/booths`);
+            const boothesData = await elecRes.json();
+            const myBooth = boothesData.booths?.find((b: any) => b.booth_id === boothId);
+            if (myBooth) {
+                boothElections = myBooth.assigned_elections || [];
+            }
+        }
+      } catch (e) {
+        console.error("Failed to fetch booth info", e);
+      }
+
+      // 3. Fetch all elections and filter
       const allElections = await apiService.getElections();
-      const active = allElections.filter(
-        e => e.status === 'active' && (e.constituency === currentVoter.constituency || e.state === currentVoter.state)
-      );
-      setElections(active);
+      
+      if (!boothAssigned) {
+        setElections([]); // Can't vote if not assigned to a booth
+      } else {
+        const active = allElections.filter(
+          e => e.status === 'active' && boothElections.includes(e.id)
+        );
+        setElections(active);
+      }
 
       const voterVotes = await apiService.getVotesByVoter(currentVoter.id);
       setVotedElections(new Set(voterVotes.map(v => v.electionId)));
@@ -72,7 +106,13 @@ export default function VotePage() {
       }
 
       // Cast the vote
-      const vote = await apiService.castVote(selectedElection.id, currentVoter.id, selectedCandidate.id, selectedCandidate.name);
+      const vote = await apiService.castVote(
+        selectedElection.id, 
+        currentVoter.id, 
+        selectedCandidate.id, 
+        selectedCandidate.name,
+        assignedBooth?.booth_id
+      );
 
       setVoteResult({ blockHash: vote.blockHash, blockIndex: vote.blockIndex });
 
@@ -136,11 +176,24 @@ export default function VotePage() {
               <div className="flex justify-center py-12">
                 <Loader2 className="w-8 h-8 text-primary animate-spin" />
               </div>
+            ) : !assignedBooth?.assigned ? (
+              <Card className="glass border-border/50">
+                <CardContent className="p-8 text-center space-y-3">
+                  <div className="mx-auto w-16 h-16 rounded-full bg-muted/20 flex items-center justify-center mb-2">
+                    <AlertCircle className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <p className="text-foreground font-medium">Not Assigned to a Booth</p>
+                  <p className="text-sm text-muted-foreground">You must be assigned to a polling booth by an election officer before you can vote.</p>
+                </CardContent>
+              </Card>
             ) : elections.length === 0 ? (
               <Card className="glass border-border/50">
-                <CardContent className="p-8 text-center">
-                  <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">No active elections for your constituency.</p>
+                <CardContent className="p-8 text-center space-y-3">
+                  <div className="mx-auto w-16 h-16 rounded-full bg-muted/20 flex items-center justify-center mb-2">
+                    <AlertCircle className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <p className="text-foreground font-medium">No Active Elections</p>
+                  <p className="text-sm text-muted-foreground">There are no active elections assigned to your current polling booth.</p>
                 </CardContent>
               </Card>
             ) : (

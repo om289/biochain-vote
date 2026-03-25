@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Pencil, Trash2, Search, Vote, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,10 @@ import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
 import { fingerprintEnroll, isFingerprintServiceAvailable } from '@/services/biometricService';
 import { useNavigate } from 'react-router-dom';
+import { generateQRDataURL } from '@/utils/qrGenerator';
 import type { Voter, ElectionRecord, CandidateRecord } from '@/services/dbService';
+
+const FLASK_URL = `http://${window.location.hostname}:5000`;
 
 export default function AdminPage() {
   const { isAdmin, isAuthenticated, dbInitialized, setDbInitialized } = useAppStore();
@@ -76,7 +79,7 @@ export default function AdminPage() {
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">Admin Panel</h1>
-          <p className="text-sm text-muted-foreground">Manage voters, candidates & elections</p>
+          <p className="text-sm text-muted-foreground">Manage voters, candidates, elections & booths</p>
         </div>
         <Badge variant="outline" className="bg-biochain-warning/20 text-biochain-warning border-biochain-warning/30">
           <Users className="w-3 h-3 mr-1" /> Admin
@@ -94,6 +97,9 @@ export default function AdminPage() {
           <TabsTrigger value="candidates">
             <Vote className="w-4 h-4 mr-1" /> Candidates
           </TabsTrigger>
+          <TabsTrigger value="booths">
+            <Server className="w-4 h-4 mr-1" /> Booths
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="voters">
@@ -104,6 +110,9 @@ export default function AdminPage() {
         </TabsContent>
         <TabsContent value="candidates">
           <CandidateManager />
+        </TabsContent>
+        <TabsContent value="booths">
+          <BoothManager />
         </TabsContent>
       </Tabs>
     </div>
@@ -121,11 +130,28 @@ function VoterManager() {
   const [scannerAvailable, setScannerAvailable] = useState<boolean | null>(null);
   const [registeringFor, setRegisteringFor] = useState<string | null>(null);
   const [enrollStatus, setEnrollStatus] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
+  const [lockedVoters, setLockedVoters] = useState<Set<string>>(new Set());
+  const [qrVoter, setQrVoter] = useState<Voter | null>(null);
 
   const load = async () => {
     const data = await apiService.getVoters();
     setVoters(data);
     setLoading(false);
+
+    // Check lock status for each voter
+    const locked = new Set<string>();
+    for (const v of data) {
+      if (v.hasVoted) {
+        locked.add(v.id);
+      } else {
+        try {
+          const res = await fetch(`${FLASK_URL}/api/voter/${v.id}/locked`);
+          const json = await res.json();
+          if (json.locked) locked.add(v.id);
+        } catch { /* ignore */ }
+      }
+    }
+    setLockedVoters(locked);
   };
 
   useEffect(() => {
@@ -140,11 +166,13 @@ function VoterManager() {
   );
 
   const handleDelete = async (id: string) => {
+    if (lockedVoters.has(id)) return; // Blocked
     await apiService.deleteVoter(id);
     load();
   };
 
   const handleEdit = (voter: Voter) => {
+    if (lockedVoters.has(voter.id)) return;
     setEditVoter(voter);
     setDialogOpen(true);
   };
@@ -154,14 +182,11 @@ function VoterManager() {
     setDialogOpen(true);
   };
 
-  /** Register a fingerprint for a voter via the NITGEN scanner */
   const handleRegisterFingerprint = async (voter: Voter) => {
     setRegisteringFor(voter.id);
     setEnrollStatus({ id: voter.id, msg: 'Place finger on scanner...', ok: true });
     const result = await fingerprintEnroll(voter.id);
     if (result.success) {
-      // Flask already saved the real NITGEN: template directly to Supabase — do NOT overwrite it here.
-      // Just reload to show the updated fingerprint status.
       setEnrollStatus({ id: voter.id, msg: result.simulated ? '✓ Enrolled (simulated)' : '✓ Fingerprint enrolled!', ok: true });
     } else {
       setEnrollStatus({ id: voter.id, msg: result.error || 'Enrollment failed.', ok: false });
@@ -171,8 +196,6 @@ function VoterManager() {
     load();
   };
 
-
-  /** Check if a voter has a real enrolled fingerprint from the NITGEN scanner */
   const hasRegisteredFingerprint = (voter: Voter) =>
     !!(voter.fingerprint && voter.fingerprint.startsWith('NITGEN:'));
 
@@ -181,7 +204,7 @@ function VoterManager() {
       <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search by name, Aadhaar, Voter ID, constituency..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-card" />
+          <Input placeholder="Search by name, Voter ID, constituency..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-card" />
         </div>
         <Button onClick={handleAdd} className="bg-primary">
           <Plus className="w-4 h-4 mr-1" /> Add Voter
@@ -192,52 +215,73 @@ function VoterManager() {
         <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
       ) : (
         <div className="space-y-2">
-          {filtered.map(voter => (
-            <Card key={voter.id} className="glass border-border/50">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="font-medium text-foreground">{voter.name}</p>
-                  <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
-                    <span>Voter ID: {voter.voterIdNumber || 'N/A'}</span>
-                    <span>{voter.constituency || 'No constituency'}</span>
-                    <span className="text-[10px]">{voter.fingerprint ? '🟢 Fingerprint enrolled' : '🔴 No fingerprint'}</span>
-                  </div>
-                  {hasRegisteredFingerprint(voter) && (
-                    <p className="text-[10px] text-biochain-success mt-1">✓ Fingerprint enrolled</p>
-                  )}
-                  {enrollStatus?.id === voter.id && (
-                    <p className={`text-[10px] mt-1 ${enrollStatus.ok ? 'text-biochain-success' : 'text-destructive'}`}>{enrollStatus.msg}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {scannerAvailable !== false && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleRegisterFingerprint(voter)}
-                      disabled={registeringFor === voter.id}
-                      className={`text-xs ${hasRegisteredFingerprint(voter)
-                        ? 'border-biochain-success/30 text-biochain-success hover:bg-biochain-success/10'
-                        : 'border-primary/30 text-primary hover:bg-primary/10'
-                        }`}
-                    >
-                      {registeringFor === voter.id ? (
-                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning...</>
-                      ) : (
-                        <><Fingerprint className="w-3.5 h-3.5 mr-1" /> {hasRegisteredFingerprint(voter) ? 'Re-enroll' : 'Enroll Fingerprint'}</>
+          {filtered.map(voter => {
+            const isLocked = lockedVoters.has(voter.id);
+            return (
+              <Card key={voter.id} className={`glass border-border/50 ${isLocked ? 'opacity-80' : ''}`}>
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-foreground">{voter.name}</p>
+                      {isLocked && (
+                        <Badge className="bg-destructive/20 text-destructive border-destructive/30 text-[10px]">
+                          <Lock className="w-3 h-3 mr-0.5" /> Immutable
+                        </Badge>
                       )}
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground mt-1">
+                      <span>Voter ID: {voter.voterIdNumber || 'N/A'}</span>
+                      <span>{voter.constituency || 'No constituency'}</span>
+                      <span className="text-[10px]">{voter.fingerprint ? '🟢 Fingerprint enrolled' : '🔴 No fingerprint'}</span>
+                    </div>
+                    {hasRegisteredFingerprint(voter) && (
+                      <p className="text-[10px] text-biochain-success mt-1">✓ Fingerprint enrolled</p>
+                    )}
+                    {enrollStatus?.id === voter.id && (
+                      <p className={`text-[10px] mt-1 ${enrollStatus.ok ? 'text-biochain-success' : 'text-destructive'}`}>{enrollStatus.msg}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* QR button */}
+                    <Button variant="outline" size="icon" onClick={() => setQrVoter(voter)} title="Show QR">
+                      <QrCode className="w-4 h-4" />
                     </Button>
-                  )}
-                  <Button variant="ghost" size="icon" onClick={() => handleEdit(voter)}>
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(voter.id)} className="text-destructive hover:text-destructive">
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                    {scannerAvailable !== false && !isLocked && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRegisterFingerprint(voter)}
+                        disabled={registeringFor === voter.id}
+                        className={`text-xs ${hasRegisteredFingerprint(voter)
+                          ? 'border-biochain-success/30 text-biochain-success hover:bg-biochain-success/10'
+                          : 'border-primary/30 text-primary hover:bg-primary/10'
+                          }`}
+                      >
+                        {registeringFor === voter.id ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning...</>
+                        ) : (
+                          <><Fingerprint className="w-3.5 h-3.5 mr-1" /> {hasRegisteredFingerprint(voter) ? 'Re-enroll' : 'Enroll'}</>
+                        )}
+                      </Button>
+                    )}
+                    {!isLocked && (
+                      <>
+                        <Button variant="ghost" size="icon" onClick={() => handleEdit(voter)}>
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(voter.id)} className="text-destructive hover:text-destructive">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
+                    {isLocked && (
+                      <Lock className="w-4 h-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
           {filtered.length === 0 && (
             <p className="text-center text-muted-foreground text-sm py-8">No voters found.</p>
           )}
@@ -245,6 +289,28 @@ function VoterManager() {
       )}
 
       <VoterDialog open={dialogOpen} onClose={() => setDialogOpen(false)} voter={editVoter} onSaved={load} />
+
+      {/* QR Dialog */}
+      <Dialog open={!!qrVoter} onOpenChange={() => setQrVoter(null)}>
+        <DialogContent className="max-w-sm bg-card border-border text-center">
+          <DialogHeader>
+            <DialogTitle>Voter QR Code</DialogTitle>
+            <DialogDescription>{qrVoter?.name} — {qrVoter?.voterIdNumber || 'N/A'}</DialogDescription>
+          </DialogHeader>
+          {qrVoter && (
+            <div className="space-y-3">
+              <img
+                src={generateQRDataURL(`biochain://voter/${qrVoter.id}/constituency/${qrVoter.constituency || 'none'}`, 220)}
+                alt="Voter QR"
+                className="mx-auto rounded-lg border border-border"
+              />
+              <p className="text-[10px] text-muted-foreground font-mono break-all">
+                biochain://voter/{qrVoter.id}
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -285,36 +351,24 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
         <DialogHeader>
           <DialogTitle>{voter ? 'Edit Voter' : 'Add New Voter'}</DialogTitle>
           <DialogDescription>
-            {voter ? 'Update voter details in Supabase.' : 'This will add the voter to the Supabase voters table.'}
+            {voter ? 'Update voter details.' : 'Register a new voter for the election.'}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div>
             <Label>Full Name *</Label>
-            <Input
-              value={form.name}
-              onChange={e => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. Rajesh Kumar"
-            />
+            <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Rajesh Kumar" />
           </div>
           <div>
             <Label>Voter ID Number</Label>
-            <Input
-              value={form.voterIdNumber}
-              onChange={e => setForm({ ...form, voterIdNumber: e.target.value })}
-              placeholder="e.g. DL/04/001/123456"
-            />
+            <Input value={form.voterIdNumber} onChange={e => setForm({ ...form, voterIdNumber: e.target.value })} placeholder="e.g. DL/04/001/123456" />
           </div>
           <div>
             <Label>Constituency (Location)</Label>
-            <Input
-              value={form.constituency}
-              onChange={e => setForm({ ...form, constituency: e.target.value })}
-              placeholder="e.g. New Delhi"
-            />
+            <Input value={form.constituency} onChange={e => setForm({ ...form, constituency: e.target.value })} placeholder="e.g. New Delhi" />
           </div>
           <Button onClick={handleSave} className="w-full bg-primary mt-2" disabled={!form.name.trim()}>
-            <Save className="w-4 h-4 mr-1" /> {voter ? 'Update' : 'Add to Supabase'}
+            <Save className="w-4 h-4 mr-1" /> {voter ? 'Update' : 'Add Voter'}
           </Button>
         </div>
       </DialogContent>
@@ -330,6 +384,7 @@ function ElectionManager() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editElection, setEditElection] = useState<ElectionRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [qrElection, setQrElection] = useState<ElectionRecord | null>(null);
 
   const load = async () => {
     const data = await apiService.getElections();
@@ -376,6 +431,9 @@ function ElectionManager() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button variant="outline" size="icon" onClick={() => setQrElection(election)} title="Show QR">
+                      <QrCode className="w-4 h-4" />
+                    </Button>
                     <Select value={election.status} onValueChange={v => handleStatusChange(election, v as any)}>
                       <SelectTrigger className="w-28 h-8 text-xs">
                         <SelectValue />
@@ -401,6 +459,29 @@ function ElectionManager() {
       )}
 
       <ElectionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} election={editElection} onSaved={load} />
+
+      {/* Election QR Dialog */}
+      <Dialog open={!!qrElection} onOpenChange={() => setQrElection(null)}>
+        <DialogContent className="max-w-sm bg-card border-border text-center">
+          <DialogHeader>
+            <DialogTitle>Election QR Code</DialogTitle>
+            <DialogDescription>{qrElection?.title}</DialogDescription>
+          </DialogHeader>
+          {qrElection && (
+            <div className="space-y-3">
+              <img
+                src={generateQRDataURL(`biochain://election/${qrElection.id}`, 220)}
+                alt="Election QR"
+                className="mx-auto rounded-lg border border-border"
+              />
+              <p className="text-[10px] text-muted-foreground font-mono break-all">
+                biochain://election/{qrElection.id}
+              </p>
+              <p className="text-xs text-muted-foreground">Display this QR at the polling booth entrance</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -642,5 +723,268 @@ function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { ope
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+// ====== BOOTH MANAGER ======
+
+function BoothManager() {
+  const [booths, setBooths] = useState<any[]>([]);
+  const [voters, setVoters] = useState<Voter[]>([]);
+  const [elections, setElections] = useState<ElectionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState<string | null>(null);
+  const [assignElectionOpen, setAssignElectionOpen] = useState<string | null>(null);
+  const [mergeResult, setMergeResult] = useState<any>(null);
+  const [newBooth, setNewBooth] = useState({ booth_id: '', name: '', constituency: '' });
+
+  const load = async () => {
+    try {
+      const res = await fetch(`${FLASK_URL}/api/booths`);
+      const data = await res.json();
+      setBooths(data.booths || []);
+    } catch { setBooths([]); }
+    const v = await apiService.getVoters();
+    setVoters(v);
+    const elecs = await apiService.getElections();
+    setElections(elecs);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreateBooth = async () => {
+    if (!newBooth.booth_id || !newBooth.name) return;
+    await fetch(`${FLASK_URL}/api/booths`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newBooth),
+    });
+    setNewBooth({ booth_id: '', name: '', constituency: '' });
+    setCreateOpen(false);
+    load();
+  };
+
+  const handleAssign = async (boothId: string, voterId: string) => {
+    await fetch(`${FLASK_URL}/api/booths/${boothId}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voter_id: voterId }),
+    });
+    load();
+  };
+
+  const handleUnassign = async (boothId: string, voterId: string) => {
+    await fetch(`${FLASK_URL}/api/booths/${boothId}/unassign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voter_id: voterId }),
+    });
+    load();
+  };
+
+  const handleAssignElection = async (boothId: string, electionId: string) => {
+    await fetch(`${FLASK_URL}/api/booths/${boothId}/elections/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ election_id: electionId }),
+    });
+    load();
+  };
+
+  const handleUnassignElection = async (boothId: string, electionId: string) => {
+    await fetch(`${FLASK_URL}/api/booths/${boothId}/elections/unassign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ election_id: electionId }),
+    });
+    load();
+  };
+
+  const handleMerge = async () => {
+    const res = await fetch(`${FLASK_URL}/api/merge`, { method: 'POST' });
+    const data = await res.json();
+    setMergeResult(data);
+    load();
+  };
+
+  const getVoterName = (voterId: string) => {
+    const v = voters.find(vt => vt.id === voterId);
+    return v ? v.name : voterId.slice(0, 8) + '...';
+  };
+
+  const getElectionTitle = (electionId: string) => {
+    const e = elections.find(el => el.id === electionId);
+    return e ? e.title : electionId.slice(0, 8) + '...';
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Manage decentralized voting booths</p>
+        <div className="flex gap-2">
+          {booths.length > 0 && (
+            <Button onClick={handleMerge} variant="outline" className="border-biochain-warning/30 text-biochain-warning hover:bg-biochain-warning/10">
+              Merge All Chains
+            </Button>
+          )}
+          <Button onClick={() => setCreateOpen(true)} className="bg-primary">
+            <Plus className="w-4 h-4 mr-1" /> Create Booth
+          </Button>
+        </div>
+      </div>
+
+      {mergeResult && (
+        <Card className="glass border-biochain-success/30">
+          <CardContent className="p-4">
+            <p className="text-sm font-medium text-biochain-success">✓ Merge Complete!</p>
+            <p className="text-xs text-muted-foreground">
+              {mergeResult.merged_transactions} transactions merged into {mergeResult.merged_blocks} new blocks.
+              Master chain: {mergeResult.master_chain_length} blocks. Valid: {mergeResult.master_chain_valid ? 'Yes' : 'No'}
+            </p>
+            <Button onClick={() => setMergeResult(null)} size="sm" variant="ghost" className="mt-2 text-xs">Dismiss</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
+      ) : booths.length === 0 ? (
+        <Card className="glass border-border/50">
+          <CardContent className="p-8 text-center">
+            <Server className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">No booths registered yet. Create your first booth.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {booths.map((booth: any) => (
+            <Card key={booth.booth_id} className="glass border-border/50">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Server className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{booth.name}</p>
+                      <p className="text-xs text-muted-foreground">{booth.constituency} • {booth.blocks} blocks • {booth.total_votes} votes</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={booth.is_valid ? 'bg-biochain-success/20 text-biochain-success' : 'bg-destructive/20 text-destructive'}>
+                      {booth.is_valid ? 'Valid' : 'Invalid'}
+                    </Badge>
+                    <Button variant="outline" size="sm" onClick={() => { setAssignOpen(null); setAssignElectionOpen(assignElectionOpen === booth.booth_id ? null : booth.booth_id); }}>
+                      <VoteIcon className="w-3.5 h-3.5 mr-1" /> Elections
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setAssignElectionOpen(null); setAssignOpen(assignOpen === booth.booth_id ? null : booth.booth_id); }}>
+                      <UserPlus className="w-3.5 h-3.5 mr-1" /> Voters
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Assigned elections */}
+                {booth.assigned_elections && booth.assigned_elections.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <span className="text-xs text-muted-foreground mr-1 self-center">Elections:</span>
+                    {booth.assigned_elections.map((eid: string) => (
+                      <Badge key={eid} variant="outline" className="text-xs pr-1 border-biochain-cyber/30 text-biochain-cyber bg-biochain-cyber/10">
+                        {getElectionTitle(eid)}
+                        <Button variant="ghost" size="icon" className="w-4 h-4 ml-1 text-destructive hover:text-destructive" onClick={() => handleUnassignElection(booth.booth_id, eid)}>
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {/* Assigned voters */}
+                {booth.assigned_voters && booth.assigned_voters.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    <span className="text-xs text-muted-foreground mr-1 self-center">Voters:</span>
+                    {booth.assigned_voters.map((vid: string) => (
+                      <Badge key={vid} variant="outline" className="text-xs pr-1 border-primary/30 text-primary bg-primary/10">
+                        {getVoterName(vid)}
+                        <Button variant="ghost" size="icon" className="w-4 h-4 ml-1 text-destructive hover:text-destructive" onClick={() => handleUnassign(booth.booth_id, vid)}>
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {/* Voter assignment panel */}
+                {assignOpen === booth.booth_id && (
+                  <div className="border-t border-border pt-3 space-y-2 mt-2">
+                    <p className="text-xs font-medium text-muted-foreground">Select voters to assign:</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {voters
+                        .filter(v => !(booth.assigned_voters || []).includes(v.id))
+                        .map(v => (
+                          <Button key={v.id} variant="outline" size="sm" className="text-xs justify-start" onClick={() => handleAssign(booth.booth_id, v.id)}>
+                            <UserPlus className="w-3 h-3 mr-1" /> {v.name}
+                          </Button>
+                        ))}
+                      {voters.filter(v => !(booth.assigned_voters || []).includes(v.id)).length === 0 && (
+                        <p className="text-xs text-muted-foreground col-span-3">All voters assigned.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Election assignment panel */}
+                {assignElectionOpen === booth.booth_id && (
+                  <div className="border-t border-border pt-3 space-y-2 mt-2">
+                    <p className="text-xs font-medium text-muted-foreground">Select elections to authorize for this booth:</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {elections
+                        .filter(e => e.status === 'active' && !(booth.assigned_elections || []).includes(e.id))
+                        .map(e => (
+                          <Button key={e.id} variant="outline" size="sm" className="text-xs justify-start border-biochain-cyber/30 text-biochain-cyber hover:bg-biochain-cyber/10" onClick={() => handleAssignElection(booth.booth_id, e.id)}>
+                            <Plus className="w-3 h-3 mr-1" /> {e.title}
+                          </Button>
+                        ))}
+                      {elections.filter(e => e.status === 'active' && !(booth.assigned_elections || []).includes(e.id)).length === 0 && (
+                        <p className="text-xs text-muted-foreground col-span-2">All active elections assigned.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Create Booth Dialog */}
+      <Dialog open={createOpen} onOpenChange={() => setCreateOpen(false)}>
+        <DialogContent className="max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Create New Booth</DialogTitle>
+            <DialogDescription>Each booth runs an independent blockchain.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label>Booth ID</Label>
+              <Input value={newBooth.booth_id} onChange={e => setNewBooth({ ...newBooth, booth_id: e.target.value })} placeholder="e.g. booth-001" />
+            </div>
+            <div>
+              <Label>Booth Name</Label>
+              <Input value={newBooth.name} onChange={e => setNewBooth({ ...newBooth, name: e.target.value })} placeholder="e.g. Ward 5 - Station A" />
+            </div>
+            <div>
+              <Label>Constituency</Label>
+              <Input value={newBooth.constituency} onChange={e => setNewBooth({ ...newBooth, constituency: e.target.value })} placeholder="e.g. New Delhi" />
+            </div>
+            <Button onClick={handleCreateBooth} className="w-full bg-primary mt-2" disabled={!newBooth.booth_id || !newBooth.name}>
+              <Plus className="w-4 h-4 mr-1" /> Register Booth
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

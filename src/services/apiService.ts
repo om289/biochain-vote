@@ -1,7 +1,6 @@
 // API Service — IndexedDB-backed offline data layer for BioChain Vote
 
 import { voterDB, electionDB, candidateDB, voteDB, adminDB, seedDemoData, type Voter, type ElectionRecord, type CandidateRecord, type VoteRecord } from './dbService';
-import { localBlockchain } from './localBlockchain';
 
 export const apiService = {
   /**
@@ -10,10 +9,7 @@ export const apiService = {
    */
   async initialize(): Promise<void> {
     try {
-      // Seed elections, candidates, admin PIN into IndexedDB (local-only data)
       await seedDemoData();
-      // Init blockchain (local)
-      await localBlockchain.initialize();
     } catch (e) {
       console.warn('[apiService] initialize error (non-fatal):', e);
     }
@@ -84,7 +80,7 @@ export const apiService = {
     return voteDB.hasVoted(electionId, voterId);
   },
 
-  async castVote(electionId: string, voterId: string, candidateId: string, candidateName?: string): Promise<VoteRecord> {
+  async castVote(electionId: string, voterId: string, candidateId: string, candidateName?: string, boothId?: string): Promise<VoteRecord> {
     // Check if already voted via Supabase voters.has_voted
     const alreadyVoted = await voterDB.hasVoted(voterId);
     if (alreadyVoted) {
@@ -95,17 +91,33 @@ export const apiService = {
     const voteId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
-    // Also record on local blockchain for the receipt UI
-    const voterHash = await sha256Hash(`${voterId}:${electionId}:${Date.now()}`);
-    const block = await localBlockchain.recordVote({ voterId, electionId, candidateId, voterHash });
+    // Send to Python Blockchain
+    const flaskUrl = `http://${window.location.hostname}:5000`;
+    const endpoint = boothId ? `${flaskUrl}/api/booths/${boothId}/votes` : `${flaskUrl}/api/votes`;
+    
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        voter_id: voterId,
+        candidate_id: candidateId,
+        election_id: electionId
+      })
+    });
+    
+    if (!res.ok) {
+      throw new Error('Failed to record vote on the blockchain. Backend may be down.');
+    }
+    
+    const blockData = await res.json();
 
     const vote: VoteRecord = {
-      id: voteId,
+      id: crypto.randomUUID(),
       electionId,
       voterId,
       candidateId,
-      blockHash: block.hash,
-      blockIndex: block.index,
+      blockHash: blockData.block_hash,
+      blockIndex: blockData.block_index,
       timestamp,
     };
 
@@ -124,7 +136,17 @@ export const apiService = {
   },
 
   async getVotesByVoter(voterId: string): Promise<VoteRecord[]> {
-    return voteDB.getByVoter(voterId);
+    try {
+      const flaskUrl = `http://${window.location.hostname}:5000`;
+      const res = await fetch(`${flaskUrl}/api/voter/${voterId}/votes`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.votes || [];
+      }
+    } catch (e) {
+      console.error("Failed to fetch votes from blockchain", e);
+    }
+    return [];
   },
 
   async getVoteCountByElection(electionId: string): Promise<number> {
@@ -160,19 +182,29 @@ export const apiService = {
 
   // ===== Blockchain Operations =====
   async verifyBlockchain() {
-    return localBlockchain.verifyChain();
+    const flaskUrl = `http://${window.location.hostname}:5000`;
+    const res = await fetch(`${flaskUrl}/api/blocks`);
+    const data = await res.json();
+    return data.is_valid;
   },
 
   async getBlockchain() {
-    return localBlockchain.getChain();
+    const flaskUrl = `http://${window.location.hostname}:5000`;
+    const res = await fetch(`${flaskUrl}/api/blocks`);
+    const data = await res.json();
+    return data.chain;
   },
 
   async getBlockByHash(hash: string) {
-    return localBlockchain.getBlockByHash(hash);
+    const chain = await this.getBlockchain();
+    return chain.find((c: any) => c.hash === hash || c.previous_hash === hash);
   },
 
   async getBlockCount() {
-    return localBlockchain.getBlockCount();
+    const flaskUrl = `http://${window.location.hostname}:5000`;
+    const res = await fetch(`${flaskUrl}/api/blocks`);
+    const data = await res.json();
+    return data.length;
   },
 };
 

@@ -2,9 +2,11 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useAppStore } from '@/store/useAppStore';
 
 const navItems = [
   { to: '/dashboard', label: 'Home', icon: Home },
+  { to: '/identity', label: 'Identity', icon: Fingerprint },
   { to: '/vote', label: 'Vote', icon: Vote },
   { to: '/verify', label: 'Verify', icon: ShieldCheck },
   { to: '/profile', label: 'Profile', icon: User },
@@ -13,12 +15,12 @@ const navItems = [
 const adminItems = [
   { to: '/admin', label: 'Admin', icon: Users },
   { to: '/audit', label: 'Audit', icon: BarChart3 },
-  { to: '/identity', label: 'Identity', icon: Fingerprint },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const location = useLocation();
+  const { isAdmin } = useAppStore();
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -58,24 +60,28 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </NavLink>
             ))}
 
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-3 mt-6 mb-3">Administration</p>
-            {adminItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all',
-                  isActive(item.to)
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-                )}
-                aria-current={isActive(item.to) ? 'page' : undefined}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
+          {isAdmin && (
+            <>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-3 mt-6 mb-3">Administration</p>
+              {adminItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all',
+                    isActive(item.to)
+                      ? 'bg-primary/15 text-primary'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  )}
+                  aria-current={isActive(item.to) ? 'page' : undefined}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
+        </nav>
 
           <div className="p-4 border-t border-border">
             <div className="glass rounded-lg p-3">

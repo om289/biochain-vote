@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { User, Fingerprint, MapPin, CreditCard, Hash, Calendar, Shield, LogOut, Moon, Sun, CheckCircle2, AlertCircle, Clock, Vote } from 'lucide-react';
+import { User, Fingerprint, MapPin, Hash, Calendar, Shield, LogOut, Moon, Sun, CheckCircle2, AlertCircle, Clock, Vote, Link2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,10 +14,12 @@ export default function ProfilePage() {
   const { currentVoter, currentTheme, toggleTheme, logout, voteReceipts } = useAppStore();
   const navigate = useNavigate();
   const [voterVotes, setVoterVotes] = useState<VoteRecord[]>([]);
+  const [blockchainValid, setBlockchainValid] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (currentVoter) {
       apiService.getVotesByVoter(currentVoter.id).then(setVoterVotes);
+      apiService.verifyBlockchain().then(setBlockchainValid).catch(() => setBlockchainValid(null));
     }
   }, [currentVoter]);
 
@@ -36,7 +38,8 @@ export default function ProfilePage() {
     );
   }
 
-  const maskedAadhaar = `XXXX-XXXX-${currentVoter.aadhaarNumber.slice(-4)}`;
+  const hasFingerprint = !!(currentVoter.fingerprint && currentVoter.fingerprint.length > 0);
+  const hasNitgenFingerprint = !!(currentVoter.fingerprint && currentVoter.fingerprint.startsWith('NITGEN:'));
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
@@ -56,39 +59,38 @@ export default function ProfilePage() {
               </div>
               <div>
                 <h2 className="text-xl font-display font-bold text-foreground">{currentVoter.name}</h2>
-                <p className="text-sm text-muted-foreground">{currentVoter.constituency}, {currentVoter.state}</p>
+                <p className="text-sm text-muted-foreground">{currentVoter.constituency || 'No constituency assigned'}</p>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
                     <CheckCircle2 className="w-3 h-3 mr-1" /> Verified Voter
                   </Badge>
+                  {currentVoter.hasVoted && (
+                    <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
+                      <Vote className="w-3 h-3 mr-1" /> Voted
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground flex items-center gap-1"><CreditCard className="w-3 h-3" /> Aadhaar Number</p>
-                <p className="text-sm font-mono text-foreground">{maskedAadhaar}</p>
-              </div>
-              <div className="space-y-1">
                 <p className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" /> Voter ID</p>
-                <p className="text-sm font-mono text-foreground">{currentVoter.voterIdNumber}</p>
+                <p className="text-sm font-mono text-foreground">{currentVoter.voterIdNumber || 'N/A'}</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground flex items-center gap-1"><Calendar className="w-3 h-3" /> Date of Birth</p>
-                <p className="text-sm text-foreground">{new Date(currentVoter.dateOfBirth).toLocaleDateString()}</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground flex items-center gap-1"><User className="w-3 h-3" /> Gender</p>
-                <p className="text-sm text-foreground capitalize">{currentVoter.gender}</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> District</p>
-                <p className="text-sm text-foreground">{currentVoter.district}</p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Constituency</p>
+                <p className="text-sm text-foreground">{currentVoter.constituency || 'N/A'}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Registered</p>
-                <p className="text-sm text-foreground">{new Date(currentVoter.registeredAt).toLocaleDateString()}</p>
+                <p className="text-sm text-foreground">{currentVoter.registeredAt ? new Date(currentVoter.registeredAt).toLocaleDateString() : 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Link2 className="w-3 h-3" /> Blockchain Status</p>
+                <p className="text-sm text-foreground">
+                  {blockchainValid === true ? '🟢 Valid' : blockchainValid === false ? '🔴 Tampered' : '⏳ Checking...'}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -100,25 +102,29 @@ export default function ProfilePage() {
         <Card className="glass border-border/50">
           <CardHeader>
             <CardTitle className="text-base font-display flex items-center gap-2">
-              <Fingerprint className="w-5 h-5 text-primary" /> Biometric Device
+              <Fingerprint className="w-5 h-5 text-primary" /> Biometric Status
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-biochain-success/10 flex items-center justify-center">
-                  <Fingerprint className="w-4 h-4 text-biochain-success" />
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${hasNitgenFingerprint ? 'bg-biochain-success/10' : 'bg-destructive/10'}`}>
+                  <Fingerprint className={`w-4 h-4 ${hasNitgenFingerprint ? 'text-biochain-success' : 'text-destructive'}`} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">Fingerprint Sensor</p>
-                  <p className="text-xs text-muted-foreground">External USB sensor • Registered</p>
+                  <p className="text-xs text-muted-foreground">
+                    {hasNitgenFingerprint ? 'NITGEN Scanner • Enrolled' : hasFingerprint ? 'Simulated Enrollment' : 'Not enrolled'}
+                  </p>
                 </div>
               </div>
-              <Badge className="bg-biochain-success/20 text-biochain-success border-biochain-success/30">Connected</Badge>
+              <Badge className={hasFingerprint
+                ? 'bg-biochain-success/20 text-biochain-success border-biochain-success/30'
+                : 'bg-destructive/20 text-destructive border-destructive/30'
+              }>
+                {hasFingerprint ? 'Enrolled' : 'Not Enrolled'}
+              </Badge>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Credential ID: <span className="font-mono">{currentVoter.fingerprint}</span>
-            </p>
           </CardContent>
         </Card>
       </motion.div>
@@ -132,20 +138,29 @@ export default function ProfilePage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {voterVotes.length === 0 ? (
+            {voterVotes.length === 0 && voteReceipts.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">No votes cast yet.</p>
             ) : (
               <div className="space-y-2">
-                {voterVotes.map(vote => (
+                {(voteReceipts.length > 0 ? voteReceipts : voterVotes).map((vote: any) => (
                   <div key={vote.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
                     <div className="flex items-center gap-3">
                       <CheckCircle2 className="w-4 h-4 text-biochain-success" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Election: {vote.electionId}</p>
-                        <p className="text-[10px] text-muted-foreground font-mono">Block #{vote.blockIndex} • {vote.blockHash.slice(0, 16)}...</p>
+                        <p className="text-sm font-medium text-foreground">
+                          {vote.electionTitle || `Election: ${vote.electionId}`}
+                        </p>
+                        {vote.candidateName && (
+                          <p className="text-[10px] text-primary">Candidate: {vote.candidateName}</p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          Block #{vote.blockNumber || vote.blockIndex} • {(vote.transactionHash || vote.blockHash || '').slice(0, 16)}...
+                        </p>
                       </div>
                     </div>
-                    <span className="text-xs text-muted-foreground">{new Date(vote.timestamp).toLocaleDateString()}</span>
+                    <Badge className="bg-biochain-success/20 text-biochain-success text-[10px]">
+                      {vote.status || 'confirmed'}
+                    </Badge>
                   </div>
                 ))}
               </div>
