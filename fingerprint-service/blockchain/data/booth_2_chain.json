@@ -1,0 +1,39 @@
+[
+    {
+        "index": 1,
+        "timestamp": 1774371411.6434243,
+        "transactions": [],
+        "proof": 100,
+        "previous_hash": "1"
+    },
+    {
+        "index": 2,
+        "timestamp": 1774373607.9038885,
+        "transactions": [
+            {
+                "id": "472836df89a725755b9a32c349a4f147185586bc6bbca6328ccbb173b12ea257",
+                "voter_id": "00e25035-53c3-42a0-964c-a844b7ae104f",
+                "candidate_id": "cand-001",
+                "election_id": "elec-001",
+                "timestamp": 1774373607.7298677
+            }
+        ],
+        "proof": 34348,
+        "previous_hash": "d9a0a307e9a719acbe281785aa60635c42be6ac4820c2f86332effa56803f5f3"
+    },
+    {
+        "index": 3,
+        "timestamp": 1774412351.176883,
+        "transactions": [
+            {
+                "id": "3acab7d5619175e30792fd767bf991ce6b53d5a00e03717dfa10798ab9914146",
+                "voter_id": "a1125144-7014-4b11-80ba-e41b8a25d71d",
+                "candidate_id": "cand-002",
+                "election_id": "elec-001",
+                "timestamp": 1774412350.5293496
+            }
+        ],
+        "proof": 134796,
+        "previous_hash": "035e6101817e27627f0c12abcafe96e520d8403d5e9ff680c141802eaed5b147"
+    }
+]
