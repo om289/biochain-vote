@@ -1,9 +1,13 @@
-import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint, Network } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint, Network, LogOut, Clock, Settings, FileCheck, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAppStore } from '@/store/useAppStore';
 import { OfflineSyncMonitor } from '@/components/ui/OfflineSyncMonitor';
+import { useSessionLock } from '@/hooks/useSessionLock';
+import { activityLogDB } from '@/services/dbService';
+import { toast } from 'sonner';
+import { useEffect, useState, useCallback } from 'react';
 
 const navItems = [
   { to: '/dashboard', label: 'Home', icon: Home },
@@ -22,7 +26,37 @@ const adminItems = [
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const location = useLocation();
-  const { isAdmin } = useAppStore();
+  const navigate = useNavigate();
+  const { isAdmin, isAuthenticated, logout, currentVoter } = useAppStore();
+  const [lockWarning, setLockWarning] = useState(false);
+
+  const handleLock = useCallback(async () => {
+    setLockWarning(false);
+    await activityLogDB.log({
+      category: 'auth',
+      action: 'Session auto-locked (inactivity)',
+      actor: currentVoter?.id || 'unknown',
+      severity: 'warning',
+    }).catch(() => {});
+    toast.warning('Session locked due to inactivity', { duration: 4000 });
+    logout();
+    navigate('/');
+  }, [logout, navigate, currentVoter]);
+
+  // Warn 1 minute before auto-lock (9 min = 540000ms)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const warn = setTimeout(() => {
+      setLockWarning(true);
+      toast.warning('Session will auto-lock in 1 minute', {
+        description: 'Move your mouse or press any key to stay logged in.',
+        duration: 10000,
+      });
+    }, 9 * 60 * 1000);
+    return () => clearTimeout(warn);
+  }, [isAuthenticated, location.pathname]); // reset on navigation
+
+  useSessionLock(handleLock, 10 * 60 * 1000, isAuthenticated);
 
   const isActive = (path: string) => location.pathname === path;
 
