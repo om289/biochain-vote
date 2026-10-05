@@ -482,8 +482,8 @@ export const apiService = {
     return localBlockchain.getBoothChain(boothId);
   },
 
-  async getBoothChainSummary(boothId: string) {
-    return localBlockchain.getBoothChainSummary(boothId);
+  async getBoothChainSummary(boothId: string, electionId?: string) {
+    return localBlockchain.getBoothChainSummary(boothId, electionId);
   },
 
   async verifyBoothChain(boothId: string) {
@@ -502,8 +502,8 @@ export const apiService = {
     return localBlockchain.verifyMasterChain();
   },
 
-  async exportBoothPackage(boothId: string) {
-    return localBlockchain.exportBoothPackage(boothId);
+  async exportBoothPackage(boothId: string, electionId?: string) {
+    return localBlockchain.exportBoothPackage(boothId, electionId);
   },
 
   async importBoothPackage(pkg: any) {

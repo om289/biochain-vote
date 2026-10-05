@@ -806,6 +806,12 @@ function BoothSyncPanel() {
       const summaries: Record<string, any> = {};
       for (const b of boothDetails) {
         try {
+          // Load a summary per assigned election, keyed as boothId:electionId
+          for (const elecId of (b.assigned_elections || [])) {
+            const key = `${b.booth_id}:${elecId}`;
+            summaries[key] = await apiService.getBoothChainSummary(b.booth_id, elecId);
+          }
+          // Also load unscoped for backwards compat
           summaries[b.booth_id] = await apiService.getBoothChainSummary(b.booth_id);
         } catch {}
       }
