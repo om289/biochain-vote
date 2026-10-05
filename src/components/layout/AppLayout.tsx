@@ -3,6 +3,7 @@ import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint, Network }
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAppStore } from '@/store/useAppStore';
+import { OfflineSyncMonitor } from '@/components/ui/OfflineSyncMonitor';
 
 const navItems = [
   { to: '/dashboard', label: 'Home', icon: Home },
@@ -85,13 +86,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
           <div className="p-4 border-t border-border">
-            <div className="glass rounded-lg p-3">
-              <p className="text-xs text-muted-foreground">Network</p>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="w-2 h-2 rounded-full bg-biochain-success animate-pulse" />
-                <span className="text-xs text-foreground">Offline Local</span>
-              </div>
-            </div>
+            <OfflineSyncMonitor variant="compact" />
           </div>
         </aside>
       )}
@@ -107,13 +102,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/90 backdrop-blur-xl safe-bottom"
           aria-label="Mobile navigation"
         >
-          <div className="flex items-center justify-around py-2 px-2">
+          <div className="flex items-center justify-around py-2 px-2 overflow-x-auto">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-all min-w-[60px]',
+                  'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-all min-w-[54px] flex-shrink-0',
                   isActive(item.to)
                     ? 'text-primary'
                     : 'text-muted-foreground'
@@ -121,6 +116,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 aria-current={isActive(item.to) ? 'page' : undefined}
               >
                 <item.icon className={cn('w-5 h-5', isActive(item.to) && 'drop-shadow-[0_0_6px_hsl(var(--primary))]')} />
+                <span className="text-[10px] font-medium">{item.label}</span>
+              </NavLink>
+            ))}
+            {isAdmin && adminItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={cn(
+                  'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-all min-w-[54px] flex-shrink-0 text-biochain-warning',
+                  isActive(item.to)
+                    ? 'text-biochain-warning font-bold'
+                    : 'text-muted-foreground hover:text-biochain-warning'
+                )}
+                aria-current={isActive(item.to) ? 'page' : undefined}
+              >
+                <item.icon className="w-5 h-5" />
                 <span className="text-[10px] font-medium">{item.label}</span>
               </NavLink>
             ))}

@@ -103,10 +103,39 @@ export interface ZkCommitmentRecord {
   createdAt: string;
 }
 
+// ─── Offline Sync Queue Types ─────────────────────────────────────────────────
+
+export type SyncOperation =
+  | { type: 'voters/markVoted';       payload: { voterId: string } }
+  | { type: 'voters/save';            payload: { voter: any } }
+  | { type: 'voters/delete';          payload: { voterId: string } }
+  | { type: 'elections/save';         payload: { election: any } }
+  | { type: 'elections/delete';       payload: { id: string } }
+  | { type: 'candidates/save';        payload: { candidate: any } }
+  | { type: 'candidates/delete';      payload: { id: string } }
+  | { type: 'booths/save';            payload: { booth: any } }
+  | { type: 'booths/delete';          payload: { id: string } }
+  | { type: 'boothVoters/assign';     payload: { voterId: string; boothId: string } }
+  | { type: 'boothVoters/unassign';   payload: { voterId: string } }
+  | { type: 'boothElections/assign';  payload: { boothId: string; electionId: string } }
+  | { type: 'boothElections/unassign';payload: { boothId: string; electionId: string } }
+  | { type: 'blocks/save';            payload: { block: any } }
+  | { type: 'votes/upsert';           payload: { vote: any } };
+
+export interface OfflineSyncItem {
+  /** Auto-incremented by IDB */
+  id?: number;
+  operation: SyncOperation;
+  /** ISO-8601 timestamp when the item was enqueued */
+  enqueuedAt: string;
+  /** Number of failed flush attempts */
+  retries: number;
+}
+
 // ─── IndexedDB (local) ────────────────────────────────────────────────────────
 
 const DB_NAME = 'biochain-vote';
-const DB_VERSION = 4;
+const DB_VERSION = 6;
 
 let _db: IDBDatabase | null = null;
 
@@ -146,6 +175,16 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('zkCommitments')) {
         db.createObjectStore('zkCommitments', { keyPath: 'id' });
+      }
+      // v5: durable offline mutation queue
+      if (!db.objectStoreNames.contains('offline_sync_queue')) {
+        const osq = db.createObjectStore('offline_sync_queue', { keyPath: 'id', autoIncrement: true });
+        osq.createIndex('enqueuedAt', 'enqueuedAt', { unique: false });
+      }
+      // v6: per-booth blockchain sub-chains
+      if (!db.objectStoreNames.contains('booth_chains')) {
+        const bc = db.createObjectStore('booth_chains', { keyPath: 'chainKey' });
+        bc.createIndex('boothId', 'boothId', { unique: false });
       }
     };
     req.onsuccess = (e) => { _db = (e.target as IDBOpenDBRequest).result; resolve(_db); };
@@ -300,7 +339,19 @@ export const voterDB = {
       const v = _cachedVoters.find(x => x.id === voterId);
       if (v) v.hasVoted = true;
     }
-    supabase.from('voters').update({ has_voted: true }).eq('id', voterId).then(() => {});
+    if (navigator.onLine) {
+      // Online: fire-and-forget
+      supabase.from('voters').update({ has_voted: true }).eq('id', voterId)
+        .then(({ error }) => {
+          if (error) {
+            // Unexpected failure — queue for retry
+            offlineSyncQueue.enqueue({ type: 'voters/markVoted', payload: { voterId } }).catch(() => {});
+          }
+        });
+    } else {
+      // Offline: persist for later
+      await offlineSyncQueue.enqueue({ type: 'voters/markVoted', payload: { voterId } });
+    }
   },
 
   async hasVoted(voterId: string): Promise<boolean> {
@@ -308,6 +359,22 @@ export const voterDB = {
       const { data } = await supabase
         .from('voters').select('has_voted').eq('id', voterId).single();
       return !!data?.has_voted;
+    } catch {
+      return false;
+    }
+  },
+
+  /** Check if voter has voted in a SPECIFIC election (prevents cross-election lockout) */
+  async hasVotedInElection(voterId: string, electionId: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase
+        .from('votes')
+        .select('id')
+        .eq('voter_id', voterId)
+        .eq('election_id', electionId)
+        .maybeSingle();
+      if (!error && data) return true;
+      return false;
     } catch {
       return false;
     }
@@ -738,11 +805,25 @@ export const boothVoterDB = {
     return dbGetByIndex<BoothVoterRecord>('boothVoters', 'boothId', boothId);
   },
   assign: async (voterId: string, boothId: string) => {
-    supabase.from('booth_voters').upsert({ voter_id: voterId, booth_id: boothId }).then(() => {});
+    if (navigator.onLine) {
+      supabase.from('booth_voters').upsert({ voter_id: voterId, booth_id: boothId })
+        .then(({ error }) => {
+          if (error) offlineSyncQueue.enqueue({ type: 'boothVoters/assign', payload: { voterId, boothId } }).catch(() => {});
+        });
+    } else {
+      await offlineSyncQueue.enqueue({ type: 'boothVoters/assign', payload: { voterId, boothId } });
+    }
     return dbPut('boothVoters', { voterId, boothId } as BoothVoterRecord);
   },
   unassign: async (voterId: string) => {
-    supabase.from('booth_voters').delete().eq('voter_id', voterId).then(() => {});
+    if (navigator.onLine) {
+      supabase.from('booth_voters').delete().eq('voter_id', voterId)
+        .then(({ error }) => {
+          if (error) offlineSyncQueue.enqueue({ type: 'boothVoters/unassign', payload: { voterId } }).catch(() => {});
+        });
+    } else {
+      await offlineSyncQueue.enqueue({ type: 'boothVoters/unassign', payload: { voterId } });
+    }
     return dbDelete('boothVoters', voterId);
   },
   count: async () => {
@@ -818,6 +899,239 @@ export const zkCommitmentDB = {
   getByVoterElection: (voterId: string, electionId: string) =>
     dbGet<ZkCommitmentRecord>('zkCommitments', `${voterId}:${electionId}`),
 };
+
+// ─── offlineSyncQueue — IndexedDB Durable Mutation Queue ─────────────────────
+//
+// When the device is offline, any Supabase mutation is serialised into this
+// store.  When connectivity is restored the queue is flushed in FIFO order.
+// Each item is retried up to MAX_RETRIES times before being abandoned.
+
+const MAX_RETRIES = 5;
+
+async function _queueGetAll(): Promise<OfflineSyncItem[]> {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('offline_sync_queue', 'readonly');
+    const r = tx.objectStore('offline_sync_queue').getAll();
+    r.onsuccess = () => res(r.result as OfflineSyncItem[]);
+    r.onerror  = () => rej(r.error);
+  });
+}
+
+async function _queueDelete(id: number): Promise<void> {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('offline_sync_queue', 'readwrite');
+    tx.objectStore('offline_sync_queue').delete(id);
+    tx.oncomplete = () => res();
+    tx.onerror    = () => rej(tx.error);
+  });
+}
+
+async function _queuePut(item: OfflineSyncItem): Promise<void> {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('offline_sync_queue', 'readwrite');
+    tx.objectStore('offline_sync_queue').put(item);
+    tx.oncomplete = () => res();
+    tx.onerror    = () => rej(tx.error);
+  });
+}
+
+/**
+ * Execute one enqueued operation against Supabase.
+ * Returns true if the operation succeeded.
+ */
+async function _executeOperation(op: SyncOperation): Promise<boolean> {
+  try {
+    switch (op.type) {
+      case 'voters/markVoted': {
+        const { error } = await supabase.from('voters').update({ has_voted: true }).eq('id', op.payload.voterId);
+        return !error;
+      }
+      case 'voters/save': {
+        const v = op.payload.voter;
+        const { error } = await supabase.from('voters').upsert({ id: v.id, name: v.name, voter_id: v.voterIdNumber, location: v.constituency, fingerprint_template: v.fingerprint || null });
+        return !error;
+      }
+      case 'voters/delete': {
+        const { error } = await supabase.from('voters').delete().eq('id', op.payload.voterId);
+        return !error;
+      }
+      case 'elections/save': {
+        const e = op.payload.election;
+        const { error } = await supabase.from('elections').upsert({ id: e.id, title: e.title, description: e.description, type: e.type, status: e.status, start_date: e.startDate, end_date: e.endDate, constituency: e.constituency, state: e.state, created_at: e.createdAt });
+        return !error;
+      }
+      case 'elections/delete': {
+        const { error } = await supabase.from('elections').delete().eq('id', op.payload.id);
+        return !error;
+      }
+      case 'candidates/save': {
+        const c = op.payload.candidate;
+        const { error } = await supabase.from('candidates').upsert({ id: c.id, election_id: c.electionId, name: c.name, party_name: c.partyName, party_symbol: c.partySymbol, age: c.age, qualification: c.qualification, manifesto: c.manifesto, photo_url: c.photoUrl });
+        return !error;
+      }
+      case 'candidates/delete': {
+        const { error } = await supabase.from('candidates').delete().eq('id', op.payload.id);
+        return !error;
+      }
+      case 'booths/save': {
+        const { error } = await supabase.from('booths').upsert(op.payload.booth);
+        return !error;
+      }
+      case 'booths/delete': {
+        const { error } = await supabase.from('booths').delete().eq('id', op.payload.id);
+        return !error;
+      }
+      case 'boothVoters/assign': {
+        const { error } = await supabase.from('booth_voters').upsert({ voter_id: op.payload.voterId, booth_id: op.payload.boothId });
+        return !error;
+      }
+      case 'boothVoters/unassign': {
+        const { error } = await supabase.from('booth_voters').delete().eq('voter_id', op.payload.voterId);
+        return !error;
+      }
+      case 'boothElections/assign': {
+        const id = `${op.payload.boothId}:${op.payload.electionId}`;
+        const { error } = await supabase.from('booth_elections').upsert({ id, booth_id: op.payload.boothId, election_id: op.payload.electionId });
+        return !error;
+      }
+      case 'boothElections/unassign': {
+        const id = `${op.payload.boothId}:${op.payload.electionId}`;
+        const { error } = await supabase.from('booth_elections').delete().eq('id', id);
+        return !error;
+      }
+      case 'blocks/save': {
+        const b = op.payload.block;
+        const { error } = await supabase.from('blocks').upsert({ index: b.index, timestamp: b.timestamp, data: b.data, previous_hash: b.previousHash, hash: b.hash, nonce: b.nonce });
+        return !error;
+      }
+      case 'votes/upsert': {
+        const v = op.payload.vote;
+        const { error } = await supabase.from('votes').upsert({ id: v.id, voter_id: v.voterId, candidate: v.candidateId, created_at: v.timestamp });
+        return !error;
+      }
+      default:
+        return true; // unknown op — skip
+    }
+  } catch {
+    return false;
+  }
+}
+
+let _isFlushing = false;
+
+export const offlineSyncQueue = {
+  /**
+   * Persist an operation into the IndexedDB queue.
+   * Call this whenever a Supabase mutation fails or the device is offline.
+   */
+  async enqueue(operation: SyncOperation): Promise<void> {
+    const item: OfflineSyncItem = {
+      operation,
+      enqueuedAt: new Date().toISOString(),
+      retries: 0,
+    };
+    await _queuePut(item);
+    console.info('[offlineSyncQueue] enqueued:', operation.type);
+  },
+
+  /** Return the number of pending items */
+  async count(): Promise<number> {
+    return dbCount('offline_sync_queue');
+  },
+
+  /** Return all pending items (for UI display) */
+  async getAll(): Promise<OfflineSyncItem[]> {
+    return _queueGetAll();
+  },
+
+  /**
+   * Flush the queue — replay all pending operations against Supabase.
+   * Items that succeed are deleted from the queue.
+   * Items that fail are retried up to MAX_RETRIES times before being dropped.
+   *
+   * @returns number of items successfully flushed
+   */
+  async flush(): Promise<number> {
+    if (_isFlushing) return 0;
+    if (!navigator.onLine) return 0;
+
+    _isFlushing = true;
+    let flushedCount = 0;
+
+    try {
+      const items = await _queueGetAll();
+      console.info(`[offlineSyncQueue] flushing ${items.length} item(s)…`);
+
+      for (const item of items) {
+        const ok = await _executeOperation(item.operation);
+        if (ok) {
+          await _queueDelete(item.id!);
+          flushedCount++;
+          console.info(`[offlineSyncQueue] ✓ flushed ${item.operation.type} (id=${item.id})`);
+        } else {
+          item.retries++;
+          if (item.retries >= MAX_RETRIES) {
+            console.warn(`[offlineSyncQueue] ✗ giving up on ${item.operation.type} after ${MAX_RETRIES} retries — removing`);
+            await _queueDelete(item.id!);
+          } else {
+            await _queuePut(item); // save incremented retry count
+            console.warn(`[offlineSyncQueue] ✗ ${item.operation.type} retry ${item.retries}/${MAX_RETRIES}`);
+          }
+        }
+      }
+    } finally {
+      _isFlushing = false;
+    }
+
+    return flushedCount;
+  },
+
+  /**
+   * Clear the entire queue (admin action — use with care).
+   */
+  async clear(): Promise<void> {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('offline_sync_queue', 'readwrite');
+      tx.objectStore('offline_sync_queue').clear();
+      tx.oncomplete = () => res();
+      tx.onerror    = () => rej(tx.error);
+    });
+  },
+};
+
+/**
+ * Bootstrap the auto-flush worker.
+ * Call once at app startup.  Listens to 'online' events and flushes the queue
+ * whenever connectivity is restored.  Also polls every 30s as a safety net.
+ */
+export function initOfflineSyncWorker(): () => void {
+  const onOnline = () => {
+    console.info('[offlineSyncWorker] back online — flushing queue…');
+    offlineSyncQueue.flush().catch(console.error);
+  };
+
+  window.addEventListener('online', onOnline);
+
+  // Safety-net poll: flush every 30 s if we're online and queue is non-empty
+  const intervalId = setInterval(async () => {
+    if (!navigator.onLine) return;
+    const n = await offlineSyncQueue.count();
+    if (n > 0) {
+      console.info(`[offlineSyncWorker] poll: ${n} item(s) pending — flushing…`);
+      offlineSyncQueue.flush().catch(console.error);
+    }
+  }, 30_000);
+
+  // Return cleanup function
+  return () => {
+    window.removeEventListener('online', onOnline);
+    clearInterval(intervalId);
+  };
+}
 
 // ─── SHA-256 helper ─────────────────────────────────────────────────────────
 

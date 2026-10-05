@@ -1,504 +1,774 @@
-// Local Blockchain — SHA-256-linked tamper-proof ledger stored in IndexedDB
-// Fully offline. All computation happens client-side.
+/**
+ * localBlockchain.ts — BioChain Distributed Ledger
+ *
+ * ARCHITECTURE
+ * ────────────
+ *
+ *   MASTER CHAIN  (IndexedDB store: "blocks")
+ *   ─────────────────────────────────────────
+ *   Contains only structural blocks:
+ *     • genesis
+ *     • election_created
+ *     • election_completed
+ *     • booth_fork  — written when a booth is activated
+ *     • merge       — written when results are published (contains
+ *                     the Merkle root of every booth sub-chain)
+ *
+ *   BOOTH SUB-CHAINS  (IndexedDB store: "booth_chains", keyPath: "chainKey")
+ *   ─────────────────────────────────────────────────────────────────────────
+ *   One independent chain per booth.  chainKey = `${boothId}:${index}`.
+ *   Contains:
+ *     • fork_genesis  — first block, previousHash = master chain tip at fork time
+ *     • vote          — one block per vote cast at that booth
+ *
+ *   MERGE FLOW (admin "Publish Results")
+ *   ────────────────────────────────────
+ *   1. For each booth that participated in the election:
+ *      a. Verify the booth sub-chain integrity
+ *      b. Compute the Merkle root of all vote blocks in that booth chain
+ *   2. Write a MERGE block to the master chain:
+ *      { type: 'merge', payload: { electionId, booths: [{ boothId, merkleRoot, voteCount, valid }], masterMerkleRoot } }
+ *   3. Upload merge block + vote tallies to Supabase
+ *
+ * This ensures:
+ *   • Booths can operate 100% offline and independently
+ *   • The master chain is a tamper-proof audit log of every merge
+ *   • Any third party can re-verify results by rebuilding Merkle roots
+ *     from the raw booth sub-chain blocks
+ */
 
 import { blockDB } from './dbService';
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type BlockType =
+  | 'genesis'
+  | 'vote'
+  | 'election_created'
+  | 'election_completed'
+  | 'booth_fork'
+  | 'merge';
+
 export interface Block {
-    index: number;
-    timestamp: string;
-    data: {
-        type: 'genesis' | 'vote' | 'election_created' | 'election_completed';
-        payload: Record<string, any>;
-    };
-    previousHash: string;
-    hash: string;
-    nonce: number;
+  index: number;
+  timestamp: string;
+  data: {
+    type: BlockType;
+    payload: Record<string, any>;
+  };
+  previousHash: string;
+  hash: string;
+  nonce: number;
 }
 
-// ─── SHA-256 hash using Web Crypto API ──────────────────────────────────────
+/** A block in a booth sub-chain */
+export interface BoothBlock extends Block {
+  /** Composite key stored in IDB: `${boothId}:${index}` */
+  chainKey: string;
+  boothId: string;
+}
+
+export interface MerkleProofStep {
+  hash: string;
+  position: 'left' | 'right';
+}
+
+export interface BoothChainSummary {
+  boothId: string;
+  blockCount: number;
+  voteCount: number;
+  merkleRoot: string;
+  isValid: boolean;
+  /** Hash of the last block — used as previousHash for the merge block */
+  tipHash: string;
+}
+
+// ─── SHA-256 (Web Crypto API) ─────────────────────────────────────────────────
 
 async function sha256(message: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(message);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function deterministicStringify(obj: any): string {
-    if (typeof obj !== 'object' || obj === null) return JSON.stringify(obj);
-    if (Array.isArray(obj)) return `[${obj.map(deterministicStringify).join(',')}]`;
-    const keys = Object.keys(obj).sort();
-    const parts = keys.map(k => `"${k}":${deterministicStringify(obj[k])}`);
-    return `{${parts.join(',')}}`;
+  if (typeof obj !== 'object' || obj === null) return JSON.stringify(obj);
+  if (Array.isArray(obj)) return `[${obj.map(deterministicStringify).join(',')}]`;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map(k => `"${k}":${deterministicStringify(obj[k])}`).join(',')}}`;
 }
 
 async function calculateHash(block: Omit<Block, 'hash'>): Promise<string> {
-    const blockString = `${block.index}${block.timestamp}${deterministicStringify(block.data)}${block.previousHash}${block.nonce}`;
-    return sha256(blockString);
+  const str = `${block.index}${block.timestamp}${deterministicStringify(block.data)}${block.previousHash}${block.nonce}`;
+  return sha256(str);
 }
 
-// Create the genesis block
-async function createGenesisBlock(): Promise<Block> {
-    const block: Omit<Block, 'hash'> = {
-        index: 0,
-        timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-        data: {
-            type: 'genesis',
-            payload: {
-                message: 'BioChain Vote — Genesis Block — Decentralized Voting System for India',
-                version: '1.0.0',
-            },
-        },
-        previousHash: '0'.repeat(64),
-        nonce: 0,
-    };
+// ─── Merkle Tree ──────────────────────────────────────────────────────────────
 
-    const hash = await calculateHash(block);
-    const genesisBlock: Block = { ...block, hash };
-    await blockDB.save(genesisBlock);
-    return genesisBlock;
-}
-
-// ─── Merkle Tree (Client-Side SHA-256) ──────────────────────────────────────
-
-export interface MerkleProofStep {
-    hash: string;
-    position: 'left' | 'right';
-}
-
-/** Build a Merkle tree from an array of leaf hashes. Returns array of levels. */
 async function buildMerkleTree(leafHashes: string[]): Promise<string[][]> {
-    if (leafHashes.length === 0) return [['0'.repeat(64)]];
-
-    let currentLevel = [...leafHashes];
-    const tree: string[][] = [currentLevel];
-
-    while (currentLevel.length > 1) {
-        const nextLevel: string[] = [];
-        for (let i = 0; i < currentLevel.length; i += 2) {
-            const left = currentLevel[i];
-            const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : left; // duplicate last if odd
-            const parent = await sha256(left + right);
-            nextLevel.push(parent);
-        }
-        tree.push(nextLevel);
-        currentLevel = nextLevel;
+  if (leafHashes.length === 0) return [['0'.repeat(64)]];
+  let level = [...leafHashes];
+  const tree: string[][] = [level];
+  while (level.length > 1) {
+    const next: string[] = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const left = level[i];
+      const right = i + 1 < level.length ? level[i + 1] : left;
+      next.push(await sha256(left + right));
     }
-
-    return tree;
+    tree.push(next);
+    level = next;
+  }
+  return tree;
 }
 
-/** Get the Merkle root from a tree */
 function getMerkleRoot(tree: string[][]): string {
-    if (tree.length === 0) return '0'.repeat(64);
-    const topLevel = tree[tree.length - 1];
-    return topLevel[0] || '0'.repeat(64);
+  if (!tree.length) return '0'.repeat(64);
+  return tree[tree.length - 1][0] || '0'.repeat(64);
 }
 
-/** Get Merkle proof for a specific leaf */
 function getMerkleProof(tree: string[][], leafIndex: number): MerkleProofStep[] {
-    const proof: MerkleProofStep[] = [];
-    let idx = leafIndex;
-
-    for (let level = 0; level < tree.length - 1; level++) {
-        const currentLevel = tree[level];
-        const isRight = idx % 2 === 1;
-        const siblingIdx = isRight ? idx - 1 : idx + 1;
-
-        if (siblingIdx < currentLevel.length) {
-            proof.push({
-                hash: currentLevel[siblingIdx],
-                position: isRight ? 'left' : 'right',
-            });
-        }
-
-        idx = Math.floor(idx / 2);
+  const proof: MerkleProofStep[] = [];
+  let idx = leafIndex;
+  for (let level = 0; level < tree.length - 1; level++) {
+    const isRight = idx % 2 === 1;
+    const sibIdx = isRight ? idx - 1 : idx + 1;
+    if (sibIdx < tree[level].length) {
+      proof.push({ hash: tree[level][sibIdx], position: isRight ? 'left' : 'right' });
     }
-
-    return proof;
+    idx = Math.floor(idx / 2);
+  }
+  return proof;
 }
 
-/** Verify a Merkle proof locally */
 async function verifyMerkleProof(leafHash: string, proof: MerkleProofStep[], expectedRoot: string): Promise<boolean> {
-    let current = leafHash;
-    for (const step of proof) {
-        if (step.position === 'right') {
-            current = await sha256(current + step.hash);
-        } else {
-            current = await sha256(step.hash + current);
-        }
-    }
-    return current === expectedRoot;
+  let cur = leafHash;
+  for (const step of proof) {
+    cur = step.position === 'right' ? await sha256(cur + step.hash) : await sha256(step.hash + cur);
+  }
+  return cur === expectedRoot;
 }
 
-// ─── Main Service ───────────────────────────────────────────────────────────
+// ─── IndexedDB helpers for booth_chains store ─────────────────────────────────
+
+async function _openDB(): Promise<IDBDatabase> {
+  // Re-use the same DB opened by dbService (same name + version)
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('biochain-vote');
+    req.onsuccess = e => resolve((e.target as IDBOpenDBRequest).result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function _boothGetAll(boothId: string): Promise<BoothBlock[]> {
+  const db = await _openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('booth_chains', 'readonly');
+    const idx = tx.objectStore('booth_chains').index('boothId');
+    const r = idx.getAll(boothId);
+    r.onsuccess = () => res((r.result as BoothBlock[]).sort((a, b) => a.index - b.index));
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function _boothGet(boothId: string, index: number): Promise<BoothBlock | undefined> {
+  const db = await _openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('booth_chains', 'readonly');
+    const r = tx.objectStore('booth_chains').get(`${boothId}:${index}`);
+    r.onsuccess = () => res(r.result as BoothBlock | undefined);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function _boothPut(block: BoothBlock): Promise<void> {
+  const db = await _openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('booth_chains', 'readwrite');
+    tx.objectStore('booth_chains').put(block);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function _boothCount(boothId: string): Promise<number> {
+  const blocks = await _boothGetAll(boothId);
+  return blocks.length;
+}
+
+// ─── Master chain helpers ──────────────────────────────────────────────────────
+
+async function _masterGetAll(): Promise<Block[]> {
+  const blocks = await blockDB.getAll() as Block[];
+  return blocks.sort((a, b) => a.index - b.index);
+}
+
+async function _masterGetLatest(): Promise<Block | undefined> {
+  return blockDB.getLast() as Promise<Block | undefined>;
+}
+
+async function _masterSave(block: Block): Promise<void> {
+  await blockDB.save(block);
+}
+
+async function _masterCreateGenesis(): Promise<Block> {
+  const block: Omit<Block, 'hash'> = {
+    index: 0,
+    timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    data: {
+      type: 'genesis',
+      payload: {
+        message: 'BioChain Vote — Genesis Block — Distributed Polling Architecture',
+        version: '2.0.0',
+        architecture: 'booth-fork-merge',
+      },
+    },
+    previousHash: '0'.repeat(64),
+    nonce: 0,
+  };
+  const hash = await calculateHash(block);
+  const genesis: Block = { ...block, hash };
+  await _masterSave(genesis);
+  return genesis;
+}
+
+// ─── Main Service ─────────────────────────────────────────────────────────────
 
 export const localBlockchain = {
-    /** Initialize the blockchain (create genesis if empty) */
-    async initialize(): Promise<void> {
-        const blockCount = await blockDB.count();
-        if (blockCount === 0) {
-            await createGenesisBlock();
-        }
-    },
 
-    /** Get the full chain */
-    async getChain(): Promise<Block[]> {
-        const blocks = await blockDB.getAll() as Block[];
-        return blocks.sort((a, b) => a.index - b.index);
-    },
+  // ── Initialisation ──────────────────────────────────────────────────────────
 
-    /** Get the latest block */
-    async getLatestBlock(): Promise<Block> {
-        const last = await blockDB.getLast();
-        if (!last) {
-            return createGenesisBlock();
-        }
-        return last as Block;
-    },
+  /** Create master genesis block if the chain is empty */
+  async initialize(): Promise<void> {
+    const count = await blockDB.count();
+    if (count === 0) {
+      await _masterCreateGenesis();
+    }
+  },
 
-    /** Add a new block to the chain */
-    async addBlock(data: Block['data']): Promise<Block> {
-        const previousBlock = await this.getLatestBlock();
+  // ── Master chain reads ───────────────────────────────────────────────────────
 
-        const newBlock: Omit<Block, 'hash'> = {
-            index: previousBlock.index + 1,
-            timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-            data,
-            previousHash: previousBlock.hash,
-            nonce: Math.floor(Math.random() * 1000000),
-        };
+  async getChain(): Promise<Block[]> {
+    return _masterGetAll();
+  },
 
-        const hash = await calculateHash(newBlock);
-        const block: Block = { ...newBlock, hash };
-        await blockDB.save(block);
-        return block;
-    },
+  async getLatestBlock(): Promise<Block> {
+    const last = await _masterGetLatest();
+    if (!last) return _masterCreateGenesis();
+    return last;
+  },
 
-    /** Record a vote on the blockchain */
-    async recordVote(voteData: {
-        voterId: string;
-        electionId: string;
-        candidateId: string;
-        voterHash: string; // hashed voter identity for privacy
-        boothId?: string;
-    }): Promise<Block> {
-        return this.addBlock({
-            type: 'vote',
-            payload: {
-                voterHash: voteData.voterHash,
-                voterId: voteData.voterId,
-                electionId: voteData.electionId,
-                candidateId: voteData.candidateId,
-                boothId: voteData.boothId || 'master',
-                timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-            },
-        });
-    },
+  async getBlockByHash(hash: string): Promise<Block | BoothBlock | undefined> {
+    const master = await _masterGetAll();
+    const found = master.find(b => b.hash === hash);
+    if (found) return found;
+    // Also search all booth chains
+    const db = await _openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('booth_chains', 'readonly');
+      const r = tx.objectStore('booth_chains').getAll();
+      r.onsuccess = () => {
+        const booth = (r.result as BoothBlock[]).find(b => b.hash === hash);
+        res(booth);
+      };
+      r.onerror = () => rej(r.error);
+    });
+  },
 
-    /** Record an election event */
-    async recordElectionEvent(type: 'election_created' | 'election_completed', electionData: Record<string, any>): Promise<Block> {
-        return this.addBlock({
-            type,
-            payload: electionData,
-        });
-    },
+  async getBlockByIndex(index: number): Promise<Block | undefined> {
+    return blockDB.getByIndex(index) as Promise<Block | undefined>;
+  },
 
-    /** Verify the integrity of the entire chain */
-    async verifyChain(): Promise<{
-        valid: boolean;
-        totalBlocks: number;
-        invalidBlockIndex?: number;
-        error?: string;
-    }> {
-        const chain = await this.getChain();
+  async getBlockCount(): Promise<number> {
+    return blockDB.count();
+  },
 
-        if (chain.length === 0) {
-            return { valid: true, totalBlocks: 0 };
-        }
+  // ── Master chain writes ──────────────────────────────────────────────────────
 
-        // Verify genesis block
-        const genesisHash = await calculateHash({
-            index: chain[0].index,
-            timestamp: chain[0].timestamp,
-            data: chain[0].data,
-            previousHash: chain[0].previousHash,
-            nonce: chain[0].nonce,
-        });
+  /** Append any block to the master chain */
+  async addBlock(data: Block['data']): Promise<Block> {
+    const prev = await this.getLatestBlock();
+    const b: Omit<Block, 'hash'> = {
+      index: prev.index + 1,
+      timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      data,
+      previousHash: prev.hash,
+      nonce: Math.floor(Math.random() * 1_000_000),
+    };
+    const hash = await calculateHash(b);
+    const block: Block = { ...b, hash };
+    await _masterSave(block);
+    return block;
+  },
 
-        if (genesisHash !== chain[0].hash) {
-            return {
-                valid: false,
-                totalBlocks: chain.length,
-                invalidBlockIndex: 0,
-                error: 'Genesis block hash mismatch — chain has been tampered!',
-            };
-        }
+  async recordElectionEvent(
+    type: 'election_created' | 'election_completed',
+    payload: Record<string, any>
+  ): Promise<Block> {
+    return this.addBlock({ type, payload });
+  },
 
-        // Verify each subsequent block
-        for (let i = 1; i < chain.length; i++) {
-            const currentBlock = chain[i];
-            const previousBlock = chain[i - 1];
+  // ── Booth sub-chain — FORK ───────────────────────────────────────────────────
 
-            // Check previous hash link
-            if (currentBlock.previousHash !== previousBlock.hash) {
-                return {
-                    valid: false,
-                    totalBlocks: chain.length,
-                    invalidBlockIndex: i,
-                    error: `Block #${i} previousHash does not match Block #${i - 1} hash — chain link broken!`,
-                };
-            }
+  /**
+   * Fork the master chain for a booth/election pair.
+   * - Writes a `booth_fork` block to the MASTER chain (audit trail)
+   * - Writes a `fork_genesis` block to the BOOTH sub-chain
+   *
+   * Idempotent: if the booth already has a fork_genesis for this election,
+   * does nothing and returns the existing fork block.
+   */
+  async forkForBooth(boothId: string, electionId: string): Promise<BoothBlock> {
+    // Check if already forked
+    const existing = await _boothGetAll(boothId);
+    const alreadyForked = existing.find(
+      b => b.data.type === 'booth_fork' || (b.data as any).type === 'fork_genesis'
+    );
+    if (alreadyForked && alreadyForked.data.payload.electionId === electionId) {
+      return alreadyForked;
+    }
 
-            // Re-calculate and verify current block's hash
-            const recalculatedHash = await calculateHash({
-                index: currentBlock.index,
-                timestamp: currentBlock.timestamp,
-                data: currentBlock.data,
-                previousHash: currentBlock.previousHash,
-                nonce: currentBlock.nonce,
-            });
+    // Capture master chain tip
+    const masterTip = await this.getLatestBlock();
 
-            if (recalculatedHash !== currentBlock.hash) {
-                return {
-                    valid: false,
-                    totalBlocks: chain.length,
-                    invalidBlockIndex: i,
-                    error: `Block #${i} hash mismatch — block data has been tampered!`,
-                };
-            }
-        }
+    // 1. Write booth_fork record on master chain (audit trail)
+    await this.addBlock({
+      type: 'booth_fork',
+      payload: {
+        boothId,
+        electionId,
+        masterTipHash: masterTip.hash,
+        masterTipIndex: masterTip.index,
+        forkedAt: new Date().toISOString(),
+      },
+    });
 
-        return { valid: true, totalBlocks: chain.length };
-    },
+    // 2. Write fork_genesis to booth sub-chain
+    const forkBlock: Omit<BoothBlock, 'hash'> = {
+      index: 0,
+      chainKey: `${boothId}:0`,
+      boothId,
+      timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      data: {
+        type: 'booth_fork' as BlockType,
+        payload: {
+          boothId,
+          electionId,
+          masterTipHash: masterTip.hash,
+          masterTipIndex: masterTip.index,
+          message: `Booth ${boothId} forked from master at block #${masterTip.index}`,
+        },
+      },
+      previousHash: masterTip.hash, // ← anchors to master chain!
+      nonce: 0,
+    };
+    const hash = await calculateHash(forkBlock);
+    const genesis: BoothBlock = { ...forkBlock, hash };
+    await _boothPut(genesis);
+    return genesis;
+  },
 
-    /** Get a specific block by hash */
-    async getBlockByHash(hash: string): Promise<Block | undefined> {
-        const chain = await this.getChain();
-        return chain.find(b => b.hash === hash);
-    },
+  // ── Booth sub-chain — VOTE ───────────────────────────────────────────────────
 
-    /** Get a specific block by index */
-    async getBlockByIndex(index: number): Promise<Block | undefined> {
-        return blockDB.getByIndex(index) as Promise<Block | undefined>;
-    },
+  /**
+   * Record a vote on the booth's sub-chain.
+   * Auto-forks if the booth has not been forked yet.
+   */
+  async recordVote(voteData: {
+    voterId: string;
+    electionId: string;
+    candidateId: string;
+    voterHash: string;
+    boothId?: string;
+  }): Promise<BoothBlock> {
+    const boothId = voteData.boothId || 'master';
 
-    /** Get total block count */
-    async getBlockCount(): Promise<number> {
-        return blockDB.count();
-    },
+    // Auto-fork if needed
+    const existing = await _boothGetAll(boothId);
+    if (existing.length === 0) {
+      await this.forkForBooth(boothId, voteData.electionId);
+    }
 
-    /** Get all vote blocks */
-    async getVoteBlocks(): Promise<Block[]> {
-        const chain = await this.getChain();
-        return chain.filter(b => b.data.type === 'vote');
-    },
+    // Get latest block on this booth's chain
+    const boothBlocks = await _boothGetAll(boothId);
+    const prev = boothBlocks[boothBlocks.length - 1];
 
-    /** Get vote blocks for a specific election */
-    async getVoteBlocksByElection(electionId: string): Promise<Block[]> {
-        const voteBlocks = await this.getVoteBlocks();
-        return voteBlocks.filter(b => b.data.payload.electionId === electionId);
-    },
+    const b: Omit<BoothBlock, 'hash'> = {
+      index: prev.index + 1,
+      chainKey: `${boothId}:${prev.index + 1}`,
+      boothId,
+      timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      data: {
+        type: 'vote',
+        payload: {
+          voterHash: voteData.voterHash,
+          voterId: voteData.voterId,
+          electionId: voteData.electionId,
+          candidateId: voteData.candidateId,
+          boothId,
+          timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        },
+      },
+      previousHash: prev.hash,
+      nonce: Math.floor(Math.random() * 1_000_000),
+    };
 
-    /** Check if a voter has already voted in an election (scanning the chain) */
-    async hasVoterVoted(voterId: string, electionId: string): Promise<boolean> {
-        const voteBlocks = await this.getVoteBlocksByElection(electionId);
-        return voteBlocks.some(b => b.data.payload.voterId === voterId);
-    },
+    const hash = await calculateHash(b);
+    const block: BoothBlock = { ...b, hash };
+    await _boothPut(block);
+    return block;
+  },
 
-    /** Get all unique voter IDs who voted in an election */
-    async getVotersByElection(electionId: string): Promise<string[]> {
-        const voteBlocks = await this.getVoteBlocksByElection(electionId);
-        return [...new Set(voteBlocks.map(b => b.data.payload.voterId))];
-    },
+  // ── Booth sub-chain — reads ───────────────────────────────────────────────────
 
-    // ─── Merkle Tree Operations ──────────────────────────────────────────────
+  /** Get full booth sub-chain */
+  async getBoothChain(boothId: string): Promise<BoothBlock[]> {
+    return _boothGetAll(boothId);
+  },
 
-    /** Build a Merkle tree from all vote transactions in the chain */
-    async buildMerkleTree(): Promise<{ tree: string[][]; leafHashes: string[] }> {
-        const voteBlocks = await this.getVoteBlocks();
-        const leafHashes: string[] = [];
+  /** Get all vote blocks across ALL booth chains for an election */
+  async getVoteBlocksByElection(electionId: string): Promise<BoothBlock[]> {
+    const db = await _openDB();
+    const all: BoothBlock[] = await new Promise((res, rej) => {
+      const tx = db.transaction('booth_chains', 'readonly');
+      const r = tx.objectStore('booth_chains').getAll();
+      r.onsuccess = () => res(r.result as BoothBlock[]);
+      r.onerror = () => rej(r.error);
+    });
+    return all
+      .filter(b => b.data.type === 'vote' && b.data.payload.electionId === electionId)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  },
 
-        for (const block of voteBlocks) {
-            const txString = JSON.stringify(block.data.payload);
-            const leafHash = await sha256(txString);
-            leafHashes.push(leafHash);
-        }
+  /** Get all vote blocks across ALL booth chains */
+  async getVoteBlocks(): Promise<BoothBlock[]> {
+    const db = await _openDB();
+    const all: BoothBlock[] = await new Promise((res, rej) => {
+      const tx = db.transaction('booth_chains', 'readonly');
+      const r = tx.objectStore('booth_chains').getAll();
+      r.onsuccess = () => res(r.result as BoothBlock[]);
+      r.onerror = () => rej(r.error);
+    });
+    return all.filter(b => b.data.type === 'vote');
+  },
 
-        const tree = await buildMerkleTree(leafHashes);
-        return { tree, leafHashes };
-    },
+  async hasVoterVoted(voterId: string, electionId: string): Promise<boolean> {
+    const blocks = await this.getVoteBlocksByElection(electionId);
+    return blocks.some(b => b.data.payload.voterId === voterId);
+  },
 
-    /** Get the Merkle root of the entire chain */
-    async getMerkleRoot(): Promise<{ merkleRoot: string; leafCount: number; chainLength: number }> {
-        const { tree, leafHashes } = await this.buildMerkleTree();
-        const chain = await this.getChain();
-        return {
-            merkleRoot: getMerkleRoot(tree),
-            leafCount: leafHashes.length,
-            chainLength: chain.length,
-        };
-    },
+  async getVotersByElection(electionId: string): Promise<string[]> {
+    const blocks = await this.getVoteBlocksByElection(electionId);
+    return [...new Set(blocks.map(b => b.data.payload.voterId))];
+  },
 
-    /** Get Merkle proof for a transaction (by voter ID, tx hash, or block hash) */
-    async getMerkleProof(searchKey: string): Promise<{
-        found: boolean;
-        leafHash: string;
-        merkleRoot: string;
-        proof: MerkleProofStep[];
-        verified: boolean;
-    }> {
-        const voteBlocks = await this.getVoteBlocks();
-        const { tree, leafHashes } = await this.buildMerkleTree();
-        const root = getMerkleRoot(tree);
+  // ── Booth sub-chain — verification ───────────────────────────────────────────
 
-        // Search by voter ID, leaf hash, or block hash — in ALL chain blocks
-        // (not just voteBlocks so we can always find by block.hash)
-        const allBlocks = await this.getChain();
-        let leafIndex = -1;
-        for (let i = 0; i < voteBlocks.length; i++) {
-            const block = voteBlocks[i];
-            const txString = JSON.stringify(block.data.payload);
-            const leafHash = await sha256(txString);
+  /** Verify integrity of a single booth sub-chain */
+  async verifyBoothChain(boothId: string): Promise<{ valid: boolean; blockCount: number; error?: string }> {
+    const chain = await _boothGetAll(boothId);
+    if (chain.length === 0) return { valid: true, blockCount: 0 };
 
-            if (
-                leafHash === searchKey ||
-                block.data.payload.voterId === searchKey ||
-                block.hash === searchKey ||
-                block.data.payload.voterHash === searchKey
-            ) {
-                leafIndex = i;
-                break;
-            }
-        }
+    for (let i = 0; i < chain.length; i++) {
+      const cur = chain[i];
 
-        // Also try matching against ANY block by hash (edge case: non-vote blocks)
-        if (leafIndex === -1) {
-            const byHash = allBlocks.findIndex(b => b.hash === searchKey);
-            if (byHash !== -1 && allBlocks[byHash].data.type === 'vote') {
-                leafIndex = voteBlocks.findIndex(b => b.hash === searchKey);
-            }
-        }
+      // Verify hash
+      const recalc = await calculateHash({
+        index: cur.index,
+        timestamp: cur.timestamp,
+        data: cur.data,
+        previousHash: cur.previousHash,
+        nonce: cur.nonce,
+      });
+      if (recalc !== cur.hash) {
+        return { valid: false, blockCount: chain.length, error: `Booth ${boothId} block #${i} hash mismatch — tampered!` };
+      }
 
-        if (leafIndex === -1) {
-            return {
-                found: false,
-                leafHash: searchKey,
-                merkleRoot: root,
-                proof: [],
-                verified: false,
-            };
-        }
+      // Verify chain link
+      if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+        return { valid: false, blockCount: chain.length, error: `Booth ${boothId} block #${i} broken link` };
+      }
+    }
 
-        const proof = getMerkleProof(tree, leafIndex);
-        const verified = await verifyMerkleProof(leafHashes[leafIndex], proof, root);
+    return { valid: true, blockCount: chain.length };
+  },
 
-        return {
-            found: true,
-            leafHash: leafHashes[leafIndex],
-            merkleRoot: root,
-            proof,
-            verified,
-        };
-    },
+  /** Verify the MASTER chain integrity */
+  async verifyChain(): Promise<{ valid: boolean; totalBlocks: number; invalidBlockIndex?: number; error?: string }> {
+    const chain = await _masterGetAll();
+    if (chain.length === 0) return { valid: true, totalBlocks: 0 };
 
-    /** Verify a Merkle proof */
-    async verifyMerkleProofLocal(leafHash: string, proof: MerkleProofStep[], expectedRoot: string): Promise<boolean> {
-        return verifyMerkleProof(leafHash, proof, expectedRoot);
-    },
+    for (let i = 0; i < chain.length; i++) {
+      const cur = chain[i];
+      const recalc = await calculateHash({
+        index: cur.index, timestamp: cur.timestamp,
+        data: cur.data, previousHash: cur.previousHash, nonce: cur.nonce,
+      });
+      if (recalc !== cur.hash) {
+        return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Master block #${i} hash mismatch` };
+      }
+      if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+        return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Master block #${i} broken chain link` };
+      }
+    }
+    return { valid: true, totalBlocks: chain.length };
+  },
 
-    // ─── Analytics Helpers ───────────────────────────────────────────────────
+  // ── Booth sub-chain — Merkle ──────────────────────────────────────────────────
 
-    /** Get election results tallied from the blockchain */
-    async getElectionResults(electionId: string): Promise<{ candidateId: string; voteCount: number; percentage: number }[]> {
-        const voteBlocks = await this.getVoteBlocksByElection(electionId);
-        const totals: Record<string, number> = {};
+  /** Build Merkle tree from all vote blocks in a booth sub-chain */
+  async buildBoothMerkleTree(boothId: string): Promise<{ tree: string[][]; leafHashes: string[] }> {
+    const blocks = await _boothGetAll(boothId);
+    const voteBlocks = blocks.filter(b => b.data.type === 'vote');
+    const leafHashes = await Promise.all(
+      voteBlocks.map(b => sha256(JSON.stringify(b.data.payload)))
+    );
+    const tree = await buildMerkleTree(leafHashes);
+    return { tree, leafHashes };
+  },
 
-        for (const block of voteBlocks) {
-            const cid = block.data.payload.candidateId;
-            totals[cid] = (totals[cid] || 0) + 1;
-        }
+  /** Compute summary for a booth chain (used during merge) */
+  async getBoothChainSummary(boothId: string): Promise<BoothChainSummary> {
+    const chain = await _boothGetAll(boothId);
+    const voteBlocks = chain.filter(b => b.data.type === 'vote');
+    const { tree, leafHashes } = await this.buildBoothMerkleTree(boothId);
+    const verification = await this.verifyBoothChain(boothId);
+    const tip = chain[chain.length - 1];
 
-        const total = voteBlocks.length;
-        const results = Object.entries(totals).map(([candidateId, voteCount]) => ({
-            candidateId,
-            voteCount,
-            percentage: total > 0 ? Math.round((voteCount / total) * 10000) / 100 : 0,
-        }));
+    return {
+      boothId,
+      blockCount: chain.length,
+      voteCount: voteBlocks.length,
+      merkleRoot: getMerkleRoot(tree),
+      isValid: verification.valid,
+      tipHash: tip?.hash || '0'.repeat(64),
+    };
+  },
 
-        return results.sort((a, b) => b.voteCount - a.voteCount);
-    },
+  // ── MERGE ────────────────────────────────────────────────────────────────────
 
-    /** Get comprehensive analytics for an election */
-    async getElectionAnalytics(electionId: string): Promise<any> {
-        const voteBlocks = await this.getVoteBlocksByElection(electionId);
-        const total = voteBlocks.length;
+  /**
+   * Merge all booth sub-chains for an election into the master chain.
+   *
+   * Steps:
+   *  1. Collect all booths that have vote blocks for this election
+   *  2. Verify each booth chain
+   *  3. Compute per-booth Merkle root
+   *  4. Compute master Merkle root over all booth Merkle roots
+   *  5. Append MERGE block to master chain
+   *
+   * @returns the MERGE block written to the master chain
+   */
+  async mergeBoothChains(electionId: string): Promise<Block & { boothSummaries: BoothChainSummary[] }> {
+    // 1. Find all booths that have votes for this election
+    const allVoteBlocks = await this.getVoteBlocksByElection(electionId);
+    const boothIds = [...new Set(allVoteBlocks.map(b => b.boothId))];
 
-        // Candidate tallies
-        const candidateCounts: Record<string, number> = {};
-        for (const block of voteBlocks) {
-            const cid = block.data.payload.candidateId;
-            candidateCounts[cid] = (candidateCounts[cid] || 0) + 1;
-        }
+    if (boothIds.length === 0) {
+      throw new Error(`No booth vote blocks found for election ${electionId}`);
+    }
 
-        const results = Object.entries(candidateCounts)
-            .map(([candidateId, voteCount]) => ({
-                candidateId,
-                voteCount,
-                percentage: total > 0 ? Math.round((voteCount / total) * 10000) / 100 : 0,
-            }))
-            .sort((a, b) => b.voteCount - a.voteCount);
+    // 2 & 3. Verify + summarise each booth
+    const boothSummaries: BoothChainSummary[] = [];
+    for (const bid of boothIds) {
+      const summary = await this.getBoothChainSummary(bid);
+      boothSummaries.push(summary);
+    }
 
-        const winner = results[0] || null;
-        const runnerUp = results[1] || null;
-        const margin = winner && runnerUp ? winner.voteCount - runnerUp.voteCount : 0;
+    // 4. Master Merkle root = Merkle tree over all booth Merkle roots
+    const boothRoots = boothSummaries.map(s => s.merkleRoot);
+    const masterTree = await buildMerkleTree(boothRoots);
+    const masterMerkleRoot = getMerkleRoot(masterTree);
+    const totalVotes = boothSummaries.reduce((sum, s) => sum + s.voteCount, 0);
 
-        // Time series (bucket by hour)
-        const timeBuckets: Record<string, number> = {};
-        for (const block of voteBlocks) {
-            const ts = block.data.payload.timestamp || block.timestamp;
-            const dt = new Date(ts);
-            const bucket = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:00`;
-            timeBuckets[bucket] = (timeBuckets[bucket] || 0) + 1;
-        }
-        const timeSeries = Object.entries(timeBuckets)
-            .map(([time, votes]) => ({ time, votes }))
-            .sort((a, b) => a.time.localeCompare(b.time));
+    // 5. Write MERGE block to master chain
+    const mergeBlock = await this.addBlock({
+      type: 'merge',
+      payload: {
+        electionId,
+        mergedAt: new Date().toISOString(),
+        totalVotes,
+        masterMerkleRoot,
+        booths: boothSummaries.map(s => ({
+          boothId: s.boothId,
+          voteCount: s.voteCount,
+          blockCount: s.blockCount,
+          merkleRoot: s.merkleRoot,
+          isValid: s.isValid,
+          tipHash: s.tipHash,
+        })),
+      },
+    });
 
-        // Booth breakdown
-        const boothBreakdown: Record<string, { boothId: string; boothName: string; voteCount: number; candidates: Record<string, number> }> = {};
-        for (const block of voteBlocks) {
-            const bid = block.data.payload.boothId || 'master';
-            if (!boothBreakdown[bid]) {
-                boothBreakdown[bid] = { boothId: bid, boothName: bid, voteCount: 0, candidates: {} };
-            }
-            boothBreakdown[bid].voteCount += 1;
-            const cid = block.data.payload.candidateId;
-            boothBreakdown[bid].candidates[cid] = (boothBreakdown[bid].candidates[cid] || 0) + 1;
-        }
+    console.info(
+      `[localBlockchain] MERGE complete — election ${electionId} — ` +
+      `${boothIds.length} booth(s) — ${totalVotes} votes — masterMerkleRoot: ${masterMerkleRoot.slice(0, 16)}…`
+    );
 
-        // Chain stats
-        const chain = await this.getChain();
-        const verification = await this.verifyChain();
-        const merkle = await this.getMerkleRoot();
+    return { ...mergeBlock, boothSummaries };
+  },
 
-        return {
-            electionId,
-            totalVotes: total,
-            results,
-            winner,
-            runnerUp,
-            margin,
-            timeSeries,
-            boothBreakdown: Object.values(boothBreakdown),
-            blockchain: {
-                masterBlocks: chain.length,
-                masterValid: verification.valid,
-                merkleRoot: merkle.merkleRoot,
-                leafCount: merkle.leafCount,
-                totalBooths: Object.keys(boothBreakdown).length,
-            },
-        };
-    },
+  // ── Master Merkle (across all vote blocks globally) ───────────────────────────
+
+  async buildMerkleTree(): Promise<{ tree: string[][]; leafHashes: string[] }> {
+    const voteBlocks = await this.getVoteBlocks();
+    const leafHashes = await Promise.all(
+      voteBlocks.map(b => sha256(JSON.stringify(b.data.payload)))
+    );
+    const tree = await buildMerkleTree(leafHashes);
+    return { tree, leafHashes };
+  },
+
+  async getMerkleRoot(): Promise<{ merkleRoot: string; leafCount: number; chainLength: number }> {
+    const { tree, leafHashes } = await this.buildMerkleTree();
+    const masterChain = await _masterGetAll();
+    return {
+      merkleRoot: getMerkleRoot(tree),
+      leafCount: leafHashes.length,
+      chainLength: masterChain.length,
+    };
+  },
+
+  async getMerkleProof(searchKey: string): Promise<{
+    found: boolean;
+    leafHash: string;
+    merkleRoot: string;
+    proof: MerkleProofStep[];
+    verified: boolean;
+    boothId?: string;
+  }> {
+    const voteBlocks = await this.getVoteBlocks();
+    const { tree, leafHashes } = await this.buildMerkleTree();
+    const root = getMerkleRoot(tree);
+
+    let leafIndex = -1;
+    let foundBoothId: string | undefined;
+
+    for (let i = 0; i < voteBlocks.length; i++) {
+      const block = voteBlocks[i];
+      const leafHash = await sha256(JSON.stringify(block.data.payload));
+      if (
+        leafHash === searchKey ||
+        block.data.payload.voterId === searchKey ||
+        block.hash === searchKey ||
+        block.data.payload.voterHash === searchKey
+      ) {
+        leafIndex = i;
+        foundBoothId = block.boothId;
+        break;
+      }
+    }
+
+    if (leafIndex === -1) {
+      return { found: false, leafHash: searchKey, merkleRoot: root, proof: [], verified: false };
+    }
+
+    const proof = getMerkleProof(tree, leafIndex);
+    const verified = await verifyMerkleProof(leafHashes[leafIndex], proof, root);
+
+    return { found: true, leafHash: leafHashes[leafIndex], merkleRoot: root, proof, verified, boothId: foundBoothId };
+  },
+
+  async verifyMerkleProofLocal(leafHash: string, proof: MerkleProofStep[], expectedRoot: string): Promise<boolean> {
+    return verifyMerkleProof(leafHash, proof, expectedRoot);
+  },
+
+  // ── Analytics ─────────────────────────────────────────────────────────────────
+
+  async getElectionResults(electionId: string): Promise<{ candidateId: string; voteCount: number; percentage: number }[]> {
+    const voteBlocks = await this.getVoteBlocksByElection(electionId);
+    const totals: Record<string, number> = {};
+    for (const block of voteBlocks) {
+      const cid = block.data.payload.candidateId;
+      totals[cid] = (totals[cid] || 0) + 1;
+    }
+    const total = voteBlocks.length || 1;
+    return Object.entries(totals)
+      .map(([candidateId, voteCount]) => ({
+        candidateId, voteCount,
+        percentage: Math.round((voteCount / total) * 10000) / 100,
+      }))
+      .sort((a, b) => b.voteCount - a.voteCount);
+  },
+
+  async getElectionAnalytics(electionId: string): Promise<any> {
+    const voteBlocks = await this.getVoteBlocksByElection(electionId);
+    const total = voteBlocks.length;
+
+    // Candidate tallies
+    const candidateCounts: Record<string, number> = {};
+    for (const b of voteBlocks) {
+      const cid = b.data.payload.candidateId;
+      candidateCounts[cid] = (candidateCounts[cid] || 0) + 1;
+    }
+    const results = Object.entries(candidateCounts)
+      .map(([candidateId, voteCount]) => ({
+        candidateId, voteCount,
+        percentage: total > 0 ? Math.round((voteCount / total) * 10000) / 100 : 0,
+      }))
+      .sort((a, b) => b.voteCount - a.voteCount);
+
+    const winner = results[0] || null;
+    const runnerUp = results[1] || null;
+    const margin = winner && runnerUp ? winner.voteCount - runnerUp.voteCount : 0;
+
+    // Time series (hourly buckets)
+    const timeBuckets: Record<string, number> = {};
+    for (const b of voteBlocks) {
+      const ts = b.data.payload.timestamp || b.timestamp;
+      const dt = new Date(ts);
+      const bucket = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:00`;
+      timeBuckets[bucket] = (timeBuckets[bucket] || 0) + 1;
+    }
+    const timeSeries = Object.entries(timeBuckets)
+      .map(([time, votes]) => ({ time, votes }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    // Booth breakdown — now from actual per-booth sub-chains
+    const boothIds = [...new Set(voteBlocks.map(b => b.boothId))];
+    const boothBreakdownArr: any[] = [];
+    for (const bid of boothIds) {
+      const boothVotes = voteBlocks.filter(b => b.boothId === bid);
+      const boothCandidates: Record<string, number> = {};
+      for (const b of boothVotes) {
+        const cid = b.data.payload.candidateId;
+        boothCandidates[cid] = (boothCandidates[cid] || 0) + 1;
+      }
+      boothBreakdownArr.push({
+        boothId: bid,
+        boothName: bid,
+        voteCount: boothVotes.length,
+        candidates: boothCandidates,
+      });
+    }
+
+    // Master chain + booth chain status
+    const masterVerification = await this.verifyChain();
+    const merkle = await this.getMerkleRoot();
+    const boothSummaries: BoothChainSummary[] = [];
+    for (const bid of boothIds) {
+      boothSummaries.push(await this.getBoothChainSummary(bid));
+    }
+
+    return {
+      electionId,
+      totalVotes: total,
+      results,
+      winner,
+      runnerUp,
+      margin,
+      timeSeries,
+      boothBreakdown: boothBreakdownArr,
+      blockchain: {
+        masterBlocks: (await _masterGetAll()).length,
+        masterValid: masterVerification.valid,
+        merkleRoot: merkle.merkleRoot,
+        leafCount: merkle.leafCount,
+        totalBooths: boothIds.length,
+        boothSummaries,
+      },
+    };
+  },
 };

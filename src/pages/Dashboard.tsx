@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, Hash } from 'lucide-react';
+import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, Hash, Server } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,42 +17,70 @@ const statusConfig = {
 };
 
 function VoterInfoCard({ voter }: { voter: any }) {
+  const [boothInfo, setBoothInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (voter?.id) {
+      apiService.getVoterBooth(voter.id).then(res => {
+        if (res?.assigned && res.booth_id) {
+          setBoothInfo(res.booth_id);
+        }
+      });
+    }
+  }, [voter?.id]);
+
   return (
-    <Card className="glass border-border/50 overflow-hidden">
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-white to-green-600 opacity-60" />
+    <Card className="glass border-border/50 overflow-hidden shadow-lg">
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-primary to-green-600 opacity-70" />
       <CardContent className="p-5">
-        <div className="flex items-start gap-4">
-          <div className="w-16 h-16 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+        <div className="flex flex-col sm:flex-row items-start gap-4">
+          <div className="w-16 h-16 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 glow-primary">
             <User className="w-8 h-8 text-primary" />
           </div>
-          <div className="flex-1 space-y-3">
-            <div>
-              <h3 className="text-lg font-display font-bold text-foreground">{voter.name}</h3>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Biometric Verified
-                </Badge>
-                {voter.hasVoted && (
-                  <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
-                    <Vote className="w-3 h-3 mr-1" />
-                    Voted
+          <div className="flex-1 space-y-3 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-lg font-display font-bold text-foreground">{voter.name}</h3>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Biometric Verified
                   </Badge>
-                )}
+                  {voter.hasVoted && (
+                    <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
+                      <Vote className="w-3 h-3 mr-1" />
+                      Voted
+                    </Badge>
+                  )}
+                </div>
               </div>
+
+              {/* Polling Station Tag */}
+              {boothInfo ? (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/10 border border-primary/30 text-xs">
+                  <Server className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <span className="text-[11px] text-muted-foreground font-mono">Booth: <strong className="text-primary font-semibold">{boothInfo}</strong></span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/30 border border-border text-xs text-muted-foreground">
+                  <Server className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="text-[10px]">Master Chain Node</span>
+                </div>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Hash className="w-3.5 h-3.5 flex-shrink-0" />
+                <Hash className="w-3.5 h-3.5 flex-shrink-0 text-primary/70" />
                 <span>Voter ID: <span className="text-foreground font-mono">{voter.voterIdNumber || 'N/A'}</span></span>
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-primary/70" />
                 <span>{voter.constituency || 'Unknown'}</span>
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Fingerprint className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>{voter.fingerprint ? 'Fingerprint enrolled' : 'No fingerprint yet'}</span>
+                <Fingerprint className="w-3.5 h-3.5 flex-shrink-0 text-primary/70" />
+                <span>{voter.fingerprint ? 'Enrolled (Hardware/Sim)' : 'Pending'}</span>
               </div>
             </div>
           </div>

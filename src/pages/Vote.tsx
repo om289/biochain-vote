@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound } from 'lucide-react';
+import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound, Server } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -195,7 +195,32 @@ export default function VotePage() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
+                {/* EVM Polling Station Terminal Banner */}
+                {assignedBooth?.assigned && (
+                  <div className="flex items-center justify-between p-3.5 rounded-xl bg-card/70 border border-primary/30 glow-primary shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/25 flex items-center justify-center">
+                        <Server className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-xs tracking-wider uppercase text-foreground">
+                            Verified EVM Polling Station
+                          </span>
+                          <Badge variant="outline" className="text-[10px] bg-biochain-success/15 text-biochain-success border-biochain-success/30 font-medium py-0 px-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-biochain-success animate-pulse mr-1" /> Ready
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                          Terminal: <strong className="text-foreground">{assignedBooth.booth_name || assignedBooth.booth_id}</strong> ({assignedBooth.booth_id})
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-3">
                 {elections.map(election => {
                   const hasVoted = votedElections.has(election.id);
                   return (
@@ -222,9 +247,10 @@ export default function VotePage() {
                   );
                 })}
               </div>
-            )}
-          </motion.div>
-        )}
+            </div>
+          )}
+        </motion.div>
+      )}
 
         {step === 'select-candidate' && selectedElection && (
           <motion.div key="select-candidate" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">

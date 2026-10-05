@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, BarChart3, Loader2, CheckCircle2, AlertCircle, Database, Info, Network, Hash, CloudUpload, Trophy, TrendingUp } from 'lucide-react';
+import { ShieldCheck, BarChart3, Loader2, CheckCircle2, AlertCircle, Database, Info, Network, Hash, CloudUpload, Trophy, TrendingUp, Download, FileSpreadsheet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -97,6 +97,60 @@ export default function AuditPage() {
     }
   };
 
+  const handleExportJSON = () => {
+    if (!selectedElection || !analytics) return;
+    const manifest = {
+      manifestType: "BIOCHAIN_CERTIFIED_AUDIT_MANIFEST",
+      version: "1.0.0",
+      generatedAt: new Date().toISOString(),
+      election: {
+        id: selectedElection.id,
+        title: selectedElection.title,
+        constituency: selectedElection.constituency,
+        state: selectedElection.state,
+        status: selectedElection.status,
+      },
+      blockchain: {
+        masterBlocks: analytics.blockchain?.masterBlocks,
+        masterValid: analytics.blockchain?.masterValid,
+        merkleRoot: analytics.blockchain?.merkleRoot,
+        leafCount: analytics.blockchain?.leafCount,
+      },
+      results: analytics.results,
+      winner: analytics.winner,
+      runnerUp: analytics.runnerUp,
+      margin: analytics.margin,
+      boothBreakdown: analytics.boothBreakdown,
+      timeSeries: analytics.timeSeries,
+    };
+    const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-manifest-${selectedElection.id.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCSV = () => {
+    if (!selectedElection || !analytics) return;
+    const headers = ['Candidate Name', 'Party', 'Vote Count', 'Percentage'];
+    const rows = (analytics.results || []).map((r: any) => [
+      `"${r.candidateName || r.candidateId}"`,
+      `"${r.partyName || 'Independent'}"`,
+      r.voteCount,
+      `${r.percentage}%`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((row: any) => row.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `election-tally-${selectedElection.id.slice(0, 8)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>;
   }
@@ -128,16 +182,41 @@ export default function AuditPage() {
           <p className="text-muted-foreground mt-1">Real-time local blockchain transparency & verification</p>
         </div>
 
-        {isAdmin && analytics && (
-          <Button
-            onClick={handlePublish}
-            disabled={publishing || publishSuccess || analytics.totalVotes === 0}
-            className={`gap-2 ${publishSuccess ? 'bg-biochain-success hover:bg-biochain-success/90' : 'bg-primary'}`}
-          >
-            {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : publishSuccess ? <CheckCircle2 className="w-4 h-4" /> : <CloudUpload className="w-4 h-4" />}
-            {publishSuccess ? 'Published to Supabase' : 'Publish Results to Supabase'}
-          </Button>
-        )}
+        <div className="flex items-center flex-wrap gap-2">
+          {analytics && (
+            <>
+              <Button
+                variant="outline"
+                onClick={handleExportCSV}
+                className="gap-1.5 border-border bg-card/60 hover:bg-accent text-xs"
+                title="Export Results as CSV"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-biochain-success" />
+                CSV Tally
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleExportJSON}
+                className="gap-1.5 border-border bg-card/60 hover:bg-accent text-xs"
+                title="Download Certified JSON Audit Manifest"
+              >
+                <Download className="w-4 h-4 text-primary" />
+                Audit Manifest (JSON)
+              </Button>
+            </>
+          )}
+
+          {isAdmin && analytics && (
+            <Button
+              onClick={handlePublish}
+              disabled={publishing || publishSuccess || analytics.totalVotes === 0}
+              className={`gap-2 ${publishSuccess ? 'bg-biochain-success hover:bg-biochain-success/90' : 'bg-primary'}`}
+            >
+              {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : publishSuccess ? <CheckCircle2 className="w-4 h-4" /> : <CloudUpload className="w-4 h-4" />}
+              {publishSuccess ? 'Published to Supabase' : 'Publish Results to Supabase'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card className="glass border-border/50 shadow-xl overflow-hidden mb-6">

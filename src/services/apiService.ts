@@ -116,12 +116,12 @@ export const apiService = {
     boothId?: string
   ): Promise<VoteRecord & { commitment?: string; commitmentNonce?: string; merkleRoot?: string; signature?: string; signerAddress?: string }> {
     
-    // Check if already voted via Supabase OR local blockchain
-    const sbVoted = await voterDB.hasVoted(voterId);
+    // Check if already voted in this election via Supabase OR local blockchain
+    const sbVoted = await voterDB.hasVotedInElection(voterId, electionId);
     const localVoted = await localBlockchain.hasVoterVoted(voterId, electionId);
     
     if (sbVoted || localVoted) {
-      throw new Error('You have already voted. Double voting is not allowed.');
+      throw new Error('You have already voted in this election. Double voting is not allowed.');
     }
 
     // ── Step 1: Create ZK-commitment ──
@@ -324,16 +324,33 @@ export const apiService = {
   },
 
   /** 
-   * Publish results to Supabase (Admin action) 
-   * Uploads all vote counts to the central server.
+   * Publish results to Supabase (Admin action).
+   *
+   * Flow:
+   *  1. Call mergeBoothChains → writes a MERGE block to the master chain
+   *     containing per-booth Merkle roots (cryptographic audit seal)
+   *  2. Upload individual vote records to Supabase votes table
    */
-  async publishResults(electionId: string): Promise<{ success: boolean; publishedVotes: number }> {
-    const voteBlocks = await localBlockchain.getVoteBlocksByElection(electionId);
-    
-    function hashToUUID(hash: string): string {
-        return `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+  async publishResults(electionId: string): Promise<{ success: boolean; publishedVotes: number; mergeBlock?: any; boothSummaries?: any[] }> {
+    // ── Step 1: Merge — write MERGE block to master chain ──
+    let mergeBlock: any;
+    let boothSummaries: any[] = [];
+    try {
+      const result = await localBlockchain.mergeBoothChains(electionId);
+      mergeBlock = result;
+      boothSummaries = result.boothSummaries;
+      console.info(`[apiService] MERGE block written: #${result.index} — masterMerkleRoot: ${result.data.payload.masterMerkleRoot?.slice(0, 16)}…`);
+    } catch (e) {
+      console.warn('[apiService] mergeBoothChains failed (no booth vote blocks yet?):', e);
     }
-    
+
+    // ── Step 2: Upload votes to Supabase ──
+    const voteBlocks = await localBlockchain.getVoteBlocksByElection(electionId);
+
+    function hashToUUID(hash: string): string {
+      return `${hash.slice(0,8)}-${hash.slice(8,12)}-${hash.slice(12,16)}-${hash.slice(16,20)}-${hash.slice(20,32)}`;
+    }
+
     let publishedCount = 0;
     for (const block of voteBlocks) {
       try {
@@ -352,8 +369,8 @@ export const apiService = {
         console.error('[apiService] Failed to publish vote', block.hash, e);
       }
     }
-    
-    return { success: publishedCount > 0, publishedVotes: publishedCount };
+
+    return { success: publishedCount > 0 || !!mergeBlock, publishedVotes: publishedCount, mergeBlock, boothSummaries };
   },
 
   // ===== Admin Operations =====
@@ -379,7 +396,14 @@ export const apiService = {
   },
 
   async assignElectionToBooth(boothId: string, electionId: string): Promise<void> {
-    return boothElectionDB.assign(boothId, electionId);
+    await boothElectionDB.assign(boothId, electionId);
+    // Fork the booth sub-chain for this election so it's anchored to master chain tip NOW
+    try {
+      await localBlockchain.forkForBooth(boothId, electionId);
+      console.info(`[apiService] Booth ${boothId} forked for election ${electionId}`);
+    } catch (e) {
+      console.warn('[apiService] Fork failed (non-fatal, will auto-fork on first vote):', e);
+    }
   },
 
   async unassignElectionFromBooth(boothId: string, electionId: string): Promise<void> {
@@ -447,5 +471,34 @@ export const apiService = {
       console.warn('[apiService] Failed to get blockchain status:', e);
       return { blockCount: 0, isValid: false, merkleRoot: '' };
     }
+  },
+
+  // ===== Distributed Booth Sub-Chain & Merge Operations =====
+  async forkBoothChain(boothId: string, electionId?: string) {
+    return localBlockchain.forkForBooth(boothId, electionId);
+  },
+
+  async getBoothChain(boothId: string) {
+    return localBlockchain.getBoothChain(boothId);
+  },
+
+  async getBoothChainSummary(boothId: string) {
+    return localBlockchain.getBoothChainSummary(boothId);
+  },
+
+  async verifyBoothChain(boothId: string) {
+    return localBlockchain.verifyBoothChain(boothId);
+  },
+
+  async mergeBoothChains(electionId: string) {
+    return localBlockchain.mergeBoothChains(electionId);
+  },
+
+  async getMasterChain() {
+    return localBlockchain.getMasterChain();
+  },
+
+  async verifyMasterChain() {
+    return localBlockchain.verifyMasterChain();
   },
 };

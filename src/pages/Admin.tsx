@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database, GitFork, GitMerge, ShieldCheck, ShieldAlert, Copy, Check, RefreshCw, Layers, Link as LinkIcon, Network } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import { fingerprintEnroll, isFingerprintServiceAvailable } from '@/services/bio
 import { useNavigate } from 'react-router-dom';
 import { generateQRDataURL } from '@/utils/qrGenerator';
 import type { Voter, ElectionRecord, CandidateRecord } from '@/services/dbService';
+import type { BoothChainSummary } from '@/services/localBlockchain';
 
 // All operations are offline-first using IndexedDB — no Flask backend needed
 
@@ -360,7 +361,7 @@ function getElectionTitle(id: string) {
 }
 
 function LocalDBViewer() {
-  const [tables, setTables] = useState<string[]>(['blocks', 'elections', 'candidates', 'booths', 'boothVoters', 'boothElections', 'admins', 'zkCommitments']);
+  const [tables, setTables] = useState<string[]>(['blocks', 'booth_chains', 'offline_sync_queue', 'elections', 'candidates', 'booths', 'boothVoters', 'boothElections', 'admins', 'zkCommitments']);
   const [selectedTable, setSelectedTable] = useState('blocks');
   const [tableData, setTableData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -811,13 +812,48 @@ function BoothManager() {
   const [assignElectionOpen, setAssignElectionOpen] = useState<string | null>(null);
   const [newBooth, setNewBooth] = useState({ booth_id: '', name: '', constituency: '' });
 
+  // Distributed sub-chain and consensus merge state
+  const [chainSummaries, setChainSummaries] = useState<Record<string, BoothChainSummary>>({});
+  const [masterBlocks, setMasterBlocks] = useState<any[]>([]);
+  const [masterVerification, setMasterVerification] = useState<{ valid: boolean; totalBlocks: number }>({ valid: true, totalBlocks: 0 });
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeElectionId, setMergeElectionId] = useState<string>('');
+  const [merging, setMerging] = useState(false);
+  const [mergeResult, setMergeResult] = useState<any | null>(null);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [forkingBooth, setForkingBooth] = useState<string | null>(null);
+  const [copiedHash, setCopiedHash] = useState<string | null>(null);
+
   const load = async () => {
+    setLoading(true);
     const boothDetails = await apiService.getBoothDetails();
     setBooths(boothDetails);
     const v = await apiService.getVoters();
     setVoters(v);
     const elecs = await apiService.getElections();
     setElections(elecs);
+    if (elecs.length > 0 && !mergeElectionId) {
+      setMergeElectionId(elecs[0].id);
+    }
+
+    try {
+      const mChain = await apiService.getMasterChain();
+      setMasterBlocks(mChain);
+      const mVerify = await apiService.verifyMasterChain();
+      setMasterVerification(mVerify);
+    } catch (e) {
+      console.warn('Failed to load master chain:', e);
+    }
+
+    const summaries: Record<string, BoothChainSummary> = {};
+    for (const b of boothDetails) {
+      try {
+        summaries[b.booth_id] = await apiService.getBoothChainSummary(b.booth_id);
+      } catch (e) {
+        console.warn(`Failed to get chain summary for ${b.booth_id}:`, e);
+      }
+    }
+    setChainSummaries(summaries);
     setLoading(false);
   };
 
@@ -855,6 +891,43 @@ function BoothManager() {
     load();
   };
 
+  const handleForkBooth = async (boothId: string) => {
+    setForkingBooth(boothId);
+    try {
+      const targetBooth = booths.find(b => b.booth_id === boothId);
+      const electionId = (targetBooth?.assigned_elections || [])[0];
+      await apiService.forkBoothChain(boothId, electionId);
+      await load();
+    } catch (e: any) {
+      alert(`Fork failed: ${e.message}`);
+    } finally {
+      setForkingBooth(null);
+    }
+  };
+
+  const handleExecuteMerge = async () => {
+    if (!mergeElectionId) return;
+    setMerging(true);
+    setMergeError(null);
+    setMergeResult(null);
+    try {
+      const res = await apiService.mergeBoothChains(mergeElectionId);
+      setMergeResult(res);
+      await load();
+    } catch (e: any) {
+      setMergeError(e.message || 'Consensus merge failed');
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const handleCopy = (text: string, id: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedHash(id);
+    setTimeout(() => setCopiedHash(null), 2000);
+  };
+
   const getVoterName = (voterId: string) => {
     const v = voters.find(vt => vt.id === voterId);
     return v ? v.name : voterId.slice(0, 8) + '...';
@@ -865,60 +938,206 @@ function BoothManager() {
     return e ? e.title : electionId.slice(0, 8) + '...';
   };
 
+  const handleDeleteBooth = async (boothId: string) => {
+    if (window.confirm(`Are you sure you want to remove polling booth "${boothId}"? This will unassign any assigned voters.`)) {
+      await apiService.deleteBooth(boothId);
+      load();
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Manage offline polling booths (stored in IndexedDB)</p>
-        <Button onClick={() => setCreateOpen(true)} className="bg-primary">
-          <Plus className="w-4 h-4 mr-1" /> Create Booth
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-muted/20 p-4 rounded-xl border border-border/60">
+        <div>
+          <h2 className="text-lg font-display font-bold text-foreground flex items-center gap-2">
+            <Server className="w-5 h-5 text-primary" /> Polling Station Terminals (EVM)
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Manage decentralized electronic voting booths and terminal assignments</p>
+        </div>
+        <Button onClick={() => setCreateOpen(true)} className="bg-primary hover:bg-primary/90 shadow-md">
+          <Plus className="w-4 h-4 mr-1.5" /> Deploy New Booth
         </Button>
       </div>
 
+      {/* Master Chain Consensus & Topology Matrix */}
+      <div className="p-4 rounded-xl bg-gradient-to-r from-card/90 via-card/60 to-primary/5 border border-primary/25 space-y-3 shadow-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Network className="w-5 h-5 text-primary" />
+              <h3 className="font-display text-sm font-bold text-foreground">
+                Distributed Chain Architecture (Fork & Merge Consensus)
+              </h3>
+              <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/30">
+                IndexedDB v6
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Independent polling booth sub-chains branch offline and reconcile cryptographically via Merkle tree merge into the master chain.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              onClick={() => { setMergeResult(null); setMergeError(null); setMergeOpen(true); }}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8 shadow-sm font-medium"
+            >
+              <GitMerge className="w-3.5 h-3.5 mr-1.5" /> Consensus Merge
+            </Button>
+            <Button
+              onClick={load}
+              variant="outline"
+              size="sm"
+              className="text-xs h-8 border-border"
+              title="Refresh chains"
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-1 border-t border-border/40">
+          <div className="p-2 rounded-lg bg-background/50 border border-border/30">
+            <p className="text-base font-bold text-foreground font-mono">{masterBlocks.length}</p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Master Blocks</p>
+          </div>
+          <div className="p-2 rounded-lg bg-background/50 border border-border/30">
+            <p className="text-base font-bold text-foreground font-mono">
+              {masterBlocks.filter(b => b.data?.type === 'booth_fork').length}
+            </p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Active Forks</p>
+          </div>
+          <div className="p-2 rounded-lg bg-background/50 border border-border/30">
+            <p className="text-base font-bold text-foreground font-mono">
+              {masterBlocks.filter(b => b.data?.type === 'merge').length}
+            </p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Merge Blocks</p>
+          </div>
+          <div className="p-2 rounded-lg bg-background/50 border border-border/30">
+            <div className="flex items-center justify-center gap-1 text-emerald-400">
+              <ShieldCheck className="w-4 h-4" />
+              <span className="text-xs font-bold font-mono">{masterVerification.valid ? 'Verified' : 'Invalid'}</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Master Integrity</p>
+          </div>
+        </div>
+      </div>
+
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
+        <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
       ) : booths.length === 0 ? (
-        <Card className="glass border-border/50">
-          <CardContent className="p-8 text-center">
-            <Server className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No booths registered yet. Create your first booth.</p>
+        <Card className="glass border-border/50 text-center py-12">
+          <CardContent className="space-y-3">
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-2 glow-primary">
+              <Server className="w-8 h-8 text-primary" />
+            </div>
+            <h3 className="text-base font-bold text-foreground">No Polling Booths Deployed</h3>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              Create an offline polling station terminal to allocate voters and authorize ballot elections.
+            </p>
+            <Button onClick={() => setCreateOpen(true)} variant="outline" className="mt-2 text-xs border-primary/40 text-primary">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Deploy First Booth
+            </Button>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-5">
           {booths.map((booth: any) => (
-            <Card key={booth.booth_id} className="glass border-border/50">
-              <CardContent className="p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Server className="w-5 h-5 text-primary" />
+            <Card key={booth.booth_id} className="glass border-border/60 hover:border-primary/40 transition-all shadow-lg overflow-hidden group">
+              {/* Top EVM Terminal Gradient Accent */}
+              <div className="h-1.5 w-full bg-gradient-to-r from-orange-500 via-primary to-emerald-500 opacity-80" />
+
+              <CardContent className="p-5 space-y-4">
+                {/* Booth Terminal Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border/40">
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center flex-shrink-0 glow-primary">
+                      <Server className="w-6 h-6 text-primary" />
                     </div>
                     <div>
-                      <p className="font-medium text-foreground">{booth.name}</p>
-                      <p className="text-xs text-muted-foreground">{booth.constituency} • {booth.blocks} blocks • {booth.total_votes} votes</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-display text-base font-bold text-foreground">{booth.name}</span>
+                        <Badge variant="outline" className="font-mono text-[10px] bg-background/60 border-border text-muted-foreground">
+                          ID: {booth.booth_id}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                        <MapPin className="w-3 h-3 text-primary flex-shrink-0" />
+                        <span>Constituency: <strong className="text-foreground font-medium">{booth.constituency}</strong></span>
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge className={booth.is_valid ? 'bg-biochain-success/20 text-biochain-success' : 'bg-destructive/20 text-destructive'}>
-                      {booth.is_valid ? 'Valid' : 'Invalid'}
+
+                  {/* Status & Controls */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-xs py-1 px-2.5">
+                      <div className="w-2 h-2 rounded-full bg-biochain-success animate-pulse mr-1.5" />
+                      EVM Online
                     </Badge>
-                    <Button variant="outline" size="sm" onClick={() => { setAssignOpen(null); setAssignElectionOpen(assignElectionOpen === booth.booth_id ? null : booth.booth_id); }}>
-                      <VoteIcon className="w-3.5 h-3.5 mr-1" /> Elections
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className={`text-xs h-8 ${assignElectionOpen === booth.booth_id ? 'bg-primary/15 text-primary border-primary' : 'bg-background/40'}`} 
+                      onClick={() => { setAssignOpen(null); setAssignElectionOpen(assignElectionOpen === booth.booth_id ? null : booth.booth_id); }}
+                    >
+                      <VoteIcon className="w-3.5 h-3.5 mr-1 text-primary" /> 
+                      Ballots ({(booth.assigned_elections || []).length})
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => { setAssignElectionOpen(null); setAssignOpen(assignOpen === booth.booth_id ? null : booth.booth_id); }}>
-                      <UserPlus className="w-3.5 h-3.5 mr-1" /> Voters
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className={`text-xs h-8 ${assignOpen === booth.booth_id ? 'bg-primary/15 text-primary border-primary' : 'bg-background/40'}`} 
+                      onClick={() => { setAssignElectionOpen(null); setAssignOpen(assignOpen === booth.booth_id ? null : booth.booth_id); }}
+                    >
+                      <UserPlus className="w-3.5 h-3.5 mr-1 text-biochain-cyber" /> 
+                      Voters ({(booth.assigned_voters || []).length})
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" 
+                      title="Delete Polling Booth"
+                      onClick={() => handleDeleteBooth(booth.booth_id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
 
-                {/* Assigned elections */}
+                {/* Telemetry Matrix */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="p-2.5 rounded-lg bg-background/40 border border-border/40">
+                    <p className="text-lg font-bold text-foreground font-mono">{booth.total_votes || 0}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Votes Cast</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-background/40 border border-border/40">
+                    <p className="text-lg font-bold text-foreground font-mono">{booth.blocks || 1}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Blocks Height</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-background/40 border border-border/40">
+                    <p className="text-lg font-bold text-foreground font-mono">{(booth.assigned_voters || []).length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Voter Roster</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-background/40 border border-border/40">
+                    <p className="text-lg font-bold text-foreground font-mono">{(booth.assigned_elections || []).length}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Authorized Ballots</p>
+                  </div>
+                </div>
+
+                {/* Assigned Elections Tag Cloud */}
                 {booth.assigned_elections && booth.assigned_elections.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <span className="text-xs text-muted-foreground mr-1 self-center">Elections:</span>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">Ballots:</span>
                     {booth.assigned_elections.map((eid: string) => (
-                      <Badge key={eid} variant="outline" className="text-xs pr-1 border-biochain-cyber/30 text-biochain-cyber bg-biochain-cyber/10">
+                      <Badge key={eid} variant="outline" className="text-xs py-0.5 pl-2 pr-1 border-primary/30 text-primary bg-primary/10 font-medium">
                         {getElectionTitle(eid)}
-                        <Button variant="ghost" size="icon" className="w-4 h-4 ml-1 text-destructive hover:text-destructive" onClick={() => handleUnassignElection(booth.booth_id, eid)}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="w-4 h-4 ml-1.5 text-muted-foreground hover:text-destructive rounded-full" 
+                          onClick={() => handleUnassignElection(booth.booth_id, eid)}
+                          title="Revoke ballot authorization"
+                        >
                           <X className="w-3 h-3" />
                         </Button>
                       </Badge>
@@ -926,14 +1145,20 @@ function BoothManager() {
                   </div>
                 )}
 
-                {/* Assigned voters */}
+                {/* Assigned Voters Tag Cloud */}
                 {booth.assigned_voters && booth.assigned_voters.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    <span className="text-xs text-muted-foreground mr-1 self-center">Voters:</span>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">Roster:</span>
                     {booth.assigned_voters.map((vid: string) => (
-                      <Badge key={vid} variant="outline" className="text-xs pr-1 border-primary/30 text-primary bg-primary/10">
+                      <Badge key={vid} variant="outline" className="text-xs py-0.5 pl-2 pr-1 border-biochain-cyber/30 text-biochain-cyber bg-biochain-cyber/10 font-medium">
                         {getVoterName(vid)}
-                        <Button variant="ghost" size="icon" className="w-4 h-4 ml-1 text-destructive hover:text-destructive" onClick={() => handleUnassign(booth.booth_id, vid)}>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="w-4 h-4 ml-1.5 text-muted-foreground hover:text-destructive rounded-full" 
+                          onClick={() => handleUnassign(booth.booth_id, vid)}
+                          title="Remove voter from booth"
+                        >
                           <X className="w-3 h-3" />
                         </Button>
                       </Badge>
@@ -941,42 +1166,119 @@ function BoothManager() {
                   </div>
                 )}
 
-                {/* Voter assignment panel */}
+                {/* Sub-Chain Ledger & Cryptographic Integrity */}
+                <div className="rounded-xl bg-card/60 border border-primary/20 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <GitFork className="w-4 h-4 text-primary" />
+                      <span className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                        Decentralized Sub-Chain Ledger
+                      </span>
+                      {chainSummaries[booth.booth_id]?.isValid ? (
+                        <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30 font-medium py-0 px-2 flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3" /> Chain Verified
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] bg-destructive/15 text-destructive border-destructive/30 font-medium py-0 px-2 flex items-center gap-1">
+                          <ShieldAlert className="w-3 h-3" /> Unverified
+                        </Badge>
+                      )}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7 border-primary/40 text-primary hover:bg-primary/10"
+                      onClick={() => handleForkBooth(booth.booth_id)}
+                      disabled={forkingBooth === booth.booth_id}
+                      title="Create or anchor a sub-chain for this booth from current master chain tip"
+                    >
+                      <GitFork className="w-3 h-3 mr-1" />
+                      {forkingBooth === booth.booth_id ? 'Anchoring...' : 'Fork / Anchor Chain'}
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    <div className="p-2 rounded-lg bg-background/50 border border-border/40 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">Booth Merkle Root</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleCopy(chainSummaries[booth.booth_id]?.merkleRoot || '', `mr-${booth.booth_id}`)}
+                          title="Copy Merkle Root"
+                        >
+                          {copiedHash === `mr-${booth.booth_id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </Button>
+                      </div>
+                      <p className="font-mono text-[11px] text-foreground truncate select-all">
+                        {chainSummaries[booth.booth_id]?.merkleRoot || '0'.repeat(64)}
+                      </p>
+                    </div>
+
+                    <div className="p-2 rounded-lg bg-background/50 border border-border/40 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">Sub-Chain Tip Hash</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleCopy(chainSummaries[booth.booth_id]?.tipHash || '', `tip-${booth.booth_id}`)}
+                          title="Copy Tip Hash"
+                        >
+                          {copiedHash === `tip-${booth.booth_id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </Button>
+                      </div>
+                      <p className="font-mono text-[11px] text-foreground truncate select-all">
+                        {chainSummaries[booth.booth_id]?.tipHash || 'Pending genesis'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Voter Assignment Drawer Panel */}
                 {assignOpen === booth.booth_id && (
-                  <div className="border-t border-border pt-3 space-y-2 mt-2">
-                    <p className="text-xs font-medium text-muted-foreground">Select voters to assign:</p>
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="border-t border-border/60 pt-3.5 space-y-2.5 mt-2 bg-muted/15 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-foreground uppercase tracking-wider">Assign Voters to {booth.name}:</p>
+                      <span className="text-[11px] text-muted-foreground">Click voter name to enroll</span>
+                    </div>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                       {voters
                         .filter(v => !(booth.assigned_voters || []).includes(v.id))
                         .map(v => (
-                          <Button key={v.id} variant="outline" size="sm" className="text-xs justify-start" onClick={() => handleAssign(booth.booth_id, v.id)}>
-                            <UserPlus className="w-3 h-3 mr-1" /> {v.name}
+                          <Button key={v.id} variant="outline" size="sm" className="text-xs justify-start h-8 hover:bg-biochain-cyber/10 hover:border-biochain-cyber/40" onClick={() => handleAssign(booth.booth_id, v.id)}>
+                            <UserPlus className="w-3.5 h-3.5 mr-1.5 text-biochain-cyber" /> {v.name}
                           </Button>
                         ))}
                       {voters.filter(v => !(booth.assigned_voters || []).includes(v.id)).length === 0 && (
-                        <p className="text-xs text-muted-foreground col-span-3">All voters assigned.</p>
+                        <p className="text-xs text-muted-foreground col-span-3 py-2 italic text-center">All available voters are already assigned to this booth.</p>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 )}
 
-                {/* Election assignment panel */}
+                {/* Election Assignment Drawer Panel */}
                 {assignElectionOpen === booth.booth_id && (
-                  <div className="border-t border-border pt-3 space-y-2 mt-2">
-                    <p className="text-xs font-medium text-muted-foreground">Select elections to authorize for this booth:</p>
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="border-t border-border/60 pt-3.5 space-y-2.5 mt-2 bg-muted/15 p-3 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-foreground uppercase tracking-wider">Authorize Elections for {booth.name}:</p>
+                      <span className="text-[11px] text-muted-foreground">Click election to authorize</span>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {elections
                         .filter(e => !(booth.assigned_elections || []).includes(e.id))
                         .map(e => (
-                          <Button key={e.id} variant="outline" size="sm" className="text-xs justify-start border-biochain-cyber/30 text-biochain-cyber hover:bg-biochain-cyber/10" onClick={() => handleAssignElection(booth.booth_id, e.id)}>
-                            <Plus className="w-3 h-3 mr-1" /> {e.title}
+                          <Button key={e.id} variant="outline" size="sm" className="text-xs justify-start h-9 border-primary/30 text-foreground hover:bg-primary/10" onClick={() => handleAssignElection(booth.booth_id, e.id)}>
+                            <Plus className="w-3.5 h-3.5 mr-1.5 text-primary" /> {e.title}
                           </Button>
                         ))}
                       {elections.filter(e => !(booth.assigned_elections || []).includes(e.id)).length === 0 && (
-                        <p className="text-xs text-muted-foreground col-span-2">All elections assigned.</p>
+                        <p className="text-xs text-muted-foreground col-span-2 py-2 italic text-center">All registered elections are already authorized for this booth.</p>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 )}
               </CardContent>
             </Card>
@@ -984,28 +1286,142 @@ function BoothManager() {
         </div>
       )}
 
+      {/* Consensus Merge Dialog */}
+      <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
+        <DialogContent className="max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitMerge className="w-5 h-5 text-emerald-500" /> Multi-Booth Consensus Merge
+            </DialogTitle>
+            <DialogDescription>
+              Collect offline sub-chains from all polling stations for an election, verify their cryptographic hashes, calculate per-booth Merkle roots, and commit a single immutable MERGE block with a master Merkle root to the master blockchain.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-2">
+            <div>
+              <Label className="text-xs font-medium">Target Election</Label>
+              <Select value={mergeElectionId} onValueChange={setMergeElectionId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select election to merge" />
+                </SelectTrigger>
+                <SelectContent>
+                  {elections.map(e => (
+                    <SelectItem key={e.id} value={e.id}>{e.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Preview Participating Booths */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Participating Polling Stations</Label>
+              <div className="rounded-lg border border-border/60 bg-muted/15 p-2.5 max-h-48 overflow-y-auto space-y-1.5 text-xs">
+                {booths
+                  .filter(b => (b.assigned_elections || []).includes(mergeElectionId))
+                  .map(b => (
+                    <div key={b.booth_id} className="flex items-center justify-between p-2 rounded bg-background/50 border border-border/30">
+                      <div>
+                        <p className="font-semibold text-foreground">{b.name}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">ID: {b.booth_id}</p>
+                      </div>
+                      <div className="text-right">
+                        <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/25">
+                          {b.total_votes || 0} votes
+                        </Badge>
+                        <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                          Root: {(chainSummaries[b.booth_id]?.merkleRoot || '').slice(0, 10)}...
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                {booths.filter(b => (b.assigned_elections || []).includes(mergeElectionId)).length === 0 && (
+                  <p className="text-center text-muted-foreground py-3 text-xs italic">
+                    No polling stations assigned to this election yet.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {mergeError && (
+              <div className="p-3 rounded-lg bg-destructive/15 border border-destructive/30 text-destructive text-xs">
+                {mergeError}
+              </div>
+            )}
+
+            {mergeResult && (
+              <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 space-y-1 text-xs font-mono">
+                <div className="flex items-center gap-1.5 font-bold text-foreground">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  <span>Consensus Merge Successful!</span>
+                </div>
+                <p>Master Block: #{mergeResult.index}</p>
+                <p className="truncate">Hash: {mergeResult.hash}</p>
+                <p className="truncate">Master Merkle Root: {mergeResult.data?.payload?.masterMerkleRoot}</p>
+                <p>Total Votes Merged: {mergeResult.data?.payload?.totalVotes}</p>
+              </div>
+            )}
+
+            <Button
+              onClick={handleExecuteMerge}
+              disabled={merging || !mergeElectionId}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-md"
+            >
+              {merging ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Verifying & Merging Booth Chains...
+                </>
+              ) : (
+                <>
+                  <GitMerge className="w-4 h-4 mr-1.5" /> Execute Cryptographic Consensus Merge
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Booth Dialog */}
       <Dialog open={createOpen} onOpenChange={() => setCreateOpen(false)}>
         <DialogContent className="max-w-md bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Create New Booth</DialogTitle>
-            <DialogDescription>Each booth runs an independent blockchain.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Server className="w-5 h-5 text-primary" /> Deploy New Polling Station (EVM)
+            </DialogTitle>
+            <DialogDescription>
+              Initialize an independent, tamper-evident electronic voting terminal.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
+          <div className="grid gap-3 pt-2">
             <div>
-              <Label>Booth ID</Label>
-              <Input value={newBooth.booth_id} onChange={e => setNewBooth({ ...newBooth, booth_id: e.target.value })} placeholder="e.g. booth-001" />
+              <Label className="text-xs font-medium">Terminal / Booth ID</Label>
+              <Input 
+                value={newBooth.booth_id} 
+                onChange={e => setNewBooth({ ...newBooth, booth_id: e.target.value })} 
+                placeholder="e.g. booth-001" 
+                className="mt-1 font-mono"
+              />
             </div>
             <div>
-              <Label>Booth Name</Label>
-              <Input value={newBooth.name} onChange={e => setNewBooth({ ...newBooth, name: e.target.value })} placeholder="e.g. Ward 5 - Station A" />
+              <Label className="text-xs font-medium">Station Name</Label>
+              <Input 
+                value={newBooth.name} 
+                onChange={e => setNewBooth({ ...newBooth, name: e.target.value })} 
+                placeholder="e.g. Ward 5 - Central Station A" 
+                className="mt-1"
+              />
             </div>
             <div>
-              <Label>Constituency</Label>
-              <Input value={newBooth.constituency} onChange={e => setNewBooth({ ...newBooth, constituency: e.target.value })} placeholder="e.g. New Delhi" />
+              <Label className="text-xs font-medium">Constituency / District</Label>
+              <Input 
+                value={newBooth.constituency} 
+                onChange={e => setNewBooth({ ...newBooth, constituency: e.target.value })} 
+                placeholder="e.g. New Delhi" 
+                className="mt-1"
+              />
             </div>
-            <Button onClick={handleCreateBooth} className="w-full bg-primary mt-2" disabled={!newBooth.booth_id || !newBooth.name}>
-              <Plus className="w-4 h-4 mr-1" /> Register Booth
+            <Button onClick={handleCreateBooth} className="w-full bg-primary mt-3 shadow-md" disabled={!newBooth.booth_id || !newBooth.name}>
+              <Plus className="w-4 h-4 mr-1.5" /> Initialize & Deploy Station
             </Button>
           </div>
         </DialogContent>
