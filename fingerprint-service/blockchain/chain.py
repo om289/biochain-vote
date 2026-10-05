@@ -45,26 +45,42 @@ class Blockchain:
 
     def has_voter_already_voted(self, voter_id: str, election_id: str) -> bool:
         """Scans the entire blockchain history to prevent double voting"""
+        voter_hash = hashlib.sha256(f"voter:{voter_id}:{election_id}".encode()).hexdigest()
         for block in self.chain:
             for tx in block.transactions:
-                if tx.get('voter_id') == voter_id and tx.get('election_id') == election_id:
+                if tx.get('voter_hash') == voter_hash and tx.get('election_id') == election_id:
                     return True
         for pending_tx in self.pending_votes:
-             if pending_tx.get('voter_id') == voter_id and pending_tx.get('election_id') == election_id:
-                 return True
+            if pending_tx.get('voter_hash') == voter_hash and pending_tx.get('election_id') == election_id:
+                return True
         return False
 
     def has_voter_voted(self, voter_id: str, election_id: str = None) -> bool:
         """Check if a voter has voted in any (or a specific) election."""
-        for block in self.chain:
-            for tx in block.transactions:
-                if tx.get('voter_id') == voter_id:
-                    if election_id is None or tx.get('election_id') == election_id:
+        if election_id is not None:
+            voter_hash = hashlib.sha256(f"voter:{voter_id}:{election_id}".encode()).hexdigest()
+            for block in self.chain:
+                for tx in block.transactions:
+                    if tx.get('voter_hash') == voter_hash and tx.get('election_id') == election_id:
                         return True
-        for pending_tx in self.pending_votes:
-            if pending_tx.get('voter_id') == voter_id:
-                if election_id is None or pending_tx.get('election_id') == election_id:
+            for pending_tx in self.pending_votes:
+                if pending_tx.get('voter_hash') == voter_hash and pending_tx.get('election_id') == election_id:
                     return True
+        else:
+            # No election_id: check all elections by hashing voter_id against each tx's election_id
+            for block in self.chain:
+                for tx in block.transactions:
+                    tx_election = tx.get('election_id')
+                    if tx_election is not None:
+                        h = hashlib.sha256(f"voter:{voter_id}:{tx_election}".encode()).hexdigest()
+                        if tx.get('voter_hash') == h:
+                            return True
+            for pending_tx in self.pending_votes:
+                tx_election = pending_tx.get('election_id')
+                if tx_election is not None:
+                    h = hashlib.sha256(f"voter:{voter_id}:{tx_election}".encode()).hexdigest()
+                    if pending_tx.get('voter_hash') == h:
+                        return True
         return False
 
     def get_votes_by_election(self, election_id: str) -> list:

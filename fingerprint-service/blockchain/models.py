@@ -7,7 +7,7 @@ from typing import List
 @dataclass
 class VoteTransaction:
     id: str
-    voter_id: str
+    voter_hash: str
     candidate_id: str
     election_id: str
     timestamp: float
@@ -17,10 +17,11 @@ class VoteTransaction:
 
     @classmethod
     def create(cls, voter_id: str, candidate_id: str, election_id: str) -> "VoteTransaction":
+        voter_hash = hashlib.sha256(f"voter:{voter_id}:{election_id}".encode()).hexdigest()
         tx_id = hashlib.sha256(f"{voter_id}{candidate_id}{election_id}{time.time()}".encode()).hexdigest()
         return cls(
             id=tx_id,
-            voter_id=voter_id,
+            voter_hash=voter_hash,
             candidate_id=candidate_id,
             election_id=election_id,
             timestamp=time.time()
