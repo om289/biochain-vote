@@ -1,0 +1,339 @@
+% ============================================================
+%  BioChain Vote — Comprehensive Voter Flow Diagram (IEEE)
+% ============================================================
+%  USAGE:
+%    1. Add to your preamble:
+%         \usepackage{tikz}
+%         \usetikzlibrary{shapes.geometric, arrows.meta, positioning,
+%                         calc, fit, backgrounds}
+%
+%    2. Paste the figure block(s) below into your paper body.
+%
+%    3. Reference as Fig.~\ref{fig:biochain_flow}
+%
+%  NOTE: This is a SINGLE full-page figure using figure*.
+%        If your IEEE template complains, you can split into
+%        two separate figures at the marked cut-line.
+% ============================================================
+
+% --- Add to preamble ---
+% \usepackage{tikz}
+% \usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, fit, backgrounds}
+
+
+\begin{figure*}[!t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    % ── Node Styles ──
+    startstop/.style = {
+        rectangle, rounded corners=6pt,
+        minimum width=2.8cm, minimum height=0.85cm,
+        text centered, draw=black, line width=0.7pt,
+        fill=black!10, font=\sffamily\scriptsize\bfseries
+    },
+    process/.style = {
+        rectangle, rounded corners=3pt,
+        minimum width=2.6cm, minimum height=0.85cm,
+        text centered, draw=black, line width=0.5pt,
+        fill=blue!6, font=\sffamily\scriptsize,
+        text width=2.5cm
+    },
+    decision/.style = {
+        diamond, aspect=2.2,
+        minimum width=2cm, minimum height=0.7cm,
+        text centered, draw=black, line width=0.5pt,
+        fill=orange!10, font=\sffamily\scriptsize,
+        inner sep=1pt
+    },
+    io/.style = {
+        trapezium, trapezium left angle=70, trapezium right angle=110,
+        minimum width=2.4cm, minimum height=0.75cm,
+        text centered, draw=black, line width=0.5pt,
+        fill=green!7, font=\sffamily\scriptsize,
+        text width=2.2cm
+    },
+    database/.style = {
+        cylinder, shape border rotate=90, aspect=0.25,
+        minimum width=2.4cm, minimum height=1cm,
+        text centered, draw=black, line width=0.5pt,
+        fill=purple!8, font=\sffamily\scriptsize,
+        text width=2cm
+    },
+    dashbox/.style = {
+        rectangle, rounded corners=4pt,
+        minimum width=2.8cm, minimum height=0.85cm,
+        text centered, draw=black, line width=0.5pt,
+        fill=cyan!6, font=\sffamily\scriptsize,
+        text width=2.6cm
+    },
+    phaselabel/.style = {
+        rectangle, rounded corners=3pt,
+        minimum width=2cm, minimum height=0.6cm,
+        text centered, fill=black!80, text=white,
+        font=\sffamily\scriptsize\bfseries
+    },
+    annotation/.style = {
+        rectangle, rounded corners=2pt,
+        draw=gray, dashed, line width=0.4pt,
+        fill=yellow!5, font=\sffamily\tiny\itshape,
+        text width=2.2cm, inner sep=3pt
+    },
+    % ── Arrow Styles ──
+    arrow/.style = {-Stealth, thick, draw=black!70},
+    dasharrow/.style = {-Stealth, dashed, draw=black!50},
+    yeslabel/.style = {font=\sffamily\tiny\bfseries, text=black!70},
+    nolabel/.style  = {font=\sffamily\tiny\bfseries, text=red!70},
+]
+
+% ════════════════════════════════════════════════════
+%  PHASE I — PRE-ELECTION SETUP (ADMIN)
+% ════════════════════════════════════════════════════
+
+\node (phase1) [phaselabel] {PHASE I: PRE-ELECTION SETUP};
+
+% Row 1: Admin login
+\node (admin-start) [startstop, right=1.5cm of phase1]
+    {Election Officer\\(Admin)};
+\node (admin-pin) [process, right=1.8cm of admin-start]
+    {Enter Admin PIN\\Authentication};
+\node (admin-valid) [decision, right=1.8cm of admin-pin]
+    {PIN\\Valid?};
+\node (admin-dash) [dashbox, right=1.8cm of admin-valid]
+    {\textbf{Admin Dashboard}\\(Voters | Elections |\\Candidates | Booths)};
+\node (admin-reject) [startstop, above=0.8cm of admin-valid]
+    {Access Denied};
+
+% Row 2: Admin tasks
+\node (reg-voter) [process, below=1.5cm of admin-start]
+    {Register Voters\\(Name, Voter ID,\\Constituency)};
+\node (enroll-fp) [process, right=1.8cm of reg-voter]
+    {Enroll Fingerprint\\(Nitgen Sensor\\via Flask API)};
+\node (create-elec) [process, right=1.8cm of enroll-fp]
+    {Create Election\\(Title, Type,\\Constituency, Dates)};
+\node (add-cand) [process, right=1.8cm of create-elec]
+    {Add Candidates\\(Party, Symbol,\\Manifesto)};
+
+% Row 3: Booth setup
+\node (create-booth) [process, below=1.5cm of reg-voter]
+    {Create Polling\\Booth\\(Each booth gets\\own blockchain)};
+\node (assign-voter) [process, right=1.8cm of create-booth]
+    {Assign Voters\\to Booth};
+\node (assign-elec) [process, right=1.8cm of assign-voter]
+    {Assign Elections\\to Booth};
+\node (activate) [process, right=1.8cm of assign-elec]
+    {Set Election\\Status: \textbf{Active}};
+
+% Admin flow arrows
+\draw [arrow] (admin-start)  -- (admin-pin);
+\draw [arrow] (admin-pin)    -- (admin-valid);
+\draw [arrow] (admin-valid)  -- node[yeslabel, above] {Yes} (admin-dash);
+\draw [arrow] (admin-valid)  -- node[nolabel, right] {No} (admin-reject);
+
+\draw [arrow] (admin-dash.south) -- ++(0,-0.5) -| (reg-voter.north);
+\draw [arrow] (reg-voter)   -- (enroll-fp);
+\draw [arrow] (enroll-fp)   -- (create-elec);
+\draw [arrow] (create-elec) -- (add-cand);
+\draw [arrow] (add-cand.south) -- ++(0,-0.5) -| (create-booth.north);
+\draw [arrow] (create-booth) -- (assign-voter);
+\draw [arrow] (assign-voter)  -- (assign-elec);
+\draw [arrow] (assign-elec)   -- (activate);
+
+% Annotation
+\node (ann1) [annotation, below=0.4cm of create-booth]
+    {Each booth runs an independent SHA-256 blockchain};
+
+
+% ════════════════════════════════════════════════════
+%  PHASE II — ELECTION DAY (VOTER FLOW)
+% ════════════════════════════════════════════════════
+
+\node (phase2) [phaselabel, below=3cm of phase1]
+    {PHASE II: ELECTION DAY};
+
+% Row 4: Voter arrival + identity
+\node (voter-arrive) [startstop, right=1.5cm of phase2]
+    {Voter Arrives\\at Polling Booth};
+\node (select-id) [process, right=1.8cm of voter-arrive]
+    {Selects Identity\\from Voter Roll\\(Voter ID, Name,\\Constituency)};
+\node (id-valid) [decision, right=1.8cm of select-id]
+    {Voter ID\\Valid?};
+\node (fp-scan) [process, right=1.8cm of id-valid]
+    {Fingerprint\\Biometric Scan\\(Nitgen Sensor)};
+
+\node (reject2) [startstop, above=0.8cm of id-valid]
+    {Access Denied};
+
+% Row 5: Biometric verification
+\node (fp-match) [decision, below=1.5cm of voter-arrive]
+    {Fingerprint\\Match?};
+\node (face-scan) [process, right=1.8cm of fp-match]
+    {Face Recognition\\Verification\\{\tiny(Future Enhancement)}};
+\node (face-match) [decision, right=1.8cm of face-scan]
+    {Face\\Match?};
+\node (gen-did) [process, right=1.8cm of face-match]
+    {Generate DID /\\SSI Credential\\(SHA-256 of\\Voter UUID)};
+
+% Row 6: Voter Dashboard + Actions
+\node (voter-dash) [dashbox, below=1.5cm of fp-match]
+    {\textbf{Voter Dashboard}\\Welcome, \{Name\}\\Biometric Verified};
+
+\node (dash-vote) [process, right=1.5cm of voter-dash]
+    {Cast Vote\\(\texttt{/vote})};
+\node (dash-verify) [process, right=1.4cm of dash-vote]
+    {Verify Vote\\(\texttt{/verify})};
+\node (dash-results) [process, right=1.4cm of dash-verify]
+    {Results\\(\texttt{/audit})};
+\node (dash-identity) [process, right=1.4cm of dash-results]
+    {Identity / DID\\(\texttt{/identity})};
+
+% Voter arrival arrows
+\draw [arrow] (activate.south) -- ++(0,-1) -| (voter-arrive.north);
+\draw [arrow] (voter-arrive) -- (select-id);
+\draw [arrow] (select-id)    -- (id-valid);
+\draw [arrow] (id-valid) -- node[yeslabel, above] {Yes} (fp-scan);
+\draw [arrow] (id-valid) -- node[nolabel, right]  {No}  (reject2);
+\draw [arrow] (fp-scan.south) -- ++(0,-0.5) -| (fp-match.north);
+\draw [arrow] (fp-match) -- node[yeslabel, above] {Yes} (face-scan);
+\draw [arrow] (fp-match.south) -- ++(0,-0.5) node[nolabel, right] {No} -| (reject2.south);
+\draw [arrow] (face-scan)  -- (face-match);
+\draw [arrow] (face-match) -- node[yeslabel, above] {Yes} (gen-did);
+\draw [arrow] (face-match.north) -- ++(0,0.5) node[nolabel, right] {No} -| (reject2.east);
+\draw [arrow] (gen-did.south) -- ++(0,-0.5) -| (voter-dash.north);
+
+% Dashboard action arrows
+\draw [arrow] (voter-dash) -- (dash-vote);
+\draw [dasharrow] (voter-dash.east) ++(0.5,0.3) -- (dash-verify.north west);
+\draw [dasharrow] (voter-dash.east) ++(1.5,0.6) -- (dash-results.north west);
+\draw [dasharrow] (voter-dash.east) ++(2.5,0.9) -- (dash-identity.north west);
+
+% Annotations for dashboard
+\node (ann-vote) [annotation, below=0.3cm of dash-vote]
+    {Primary action: cast your vote};
+\node (ann-verify) [annotation, below=0.3cm of dash-verify]
+    {Search by block hash or block number};
+\node (ann-results) [annotation, below=0.3cm of dash-results]
+    {Admin-only: pie charts, bar charts, winner};
+\node (ann-identity) [annotation, below=0.3cm of dash-identity]
+    {View DID, QR code, SSI credentials};
+
+
+% ════════════════════════════════════════════════════
+%  VOTING SUB-FLOW (from Cast Vote)
+% ════════════════════════════════════════════════════
+
+% Row 7: Vote casting steps
+\node (sel-elec) [io, below=3cm of voter-dash]
+    {Step 1:\\Select Active\\Election};
+\node (sel-cand) [io, right=1.5cm of sel-elec]
+    {Step 2:\\Select\\Candidate};
+\node (confirm) [decision, right=1.5cm of sel-cand]
+    {Step 3:\\Confirm\\Vote?};
+\node (reverify) [process, right=1.5cm of confirm]
+    {Step 4:\\Biometric\\Re-verification\\(Fingerprint)};
+
+% Row 8: Blockchain recording
+\node (reverify-ok) [decision, below=1.5cm of sel-elec]
+    {Re-verification\\Passed?};
+\node (offline-store) [database, right=1.8cm of reverify-ok]
+    {\textbf{Vote Stored\\OFFLINE} in\\Booth-Local\\SHA-256\\Blockchain};
+\node (receipt) [io, right=1.8cm of offline-store]
+    {Digital Receipt\\Issued\\(Block \# + Hash)};
+\node (vote-done) [startstop, right=1.8cm of receipt]
+    {Voter Can\\Verify Vote\\on Ledger};
+
+% Voting sub-flow arrows
+\draw [arrow] (dash-vote.south) -- ++(0,-0.5) -| (sel-elec.north);
+\draw [arrow] (sel-elec)  -- (sel-cand);
+\draw [arrow] (sel-cand)  -- (confirm);
+\draw [arrow] (confirm) -- node[yeslabel, above] {Yes} (reverify);
+\draw [arrow] (confirm.south) -- ++(0,-0.5) node[nolabel, right] {No} -| (sel-cand.south);
+\draw [arrow] (reverify.south) -- ++(0,-0.5) -| (reverify-ok.north);
+\draw [arrow] (reverify-ok) -- node[yeslabel, above] {Yes} (offline-store);
+\draw [arrow] (reverify-ok.south) -- ++(0,-0.5) -| node[nolabel, near start, right] {No} (reverify.south);
+\draw [arrow] (offline-store) -- (receipt);
+\draw [arrow] (receipt)       -- (vote-done);
+
+% Annotations for offline
+\node (ann-offline) [annotation, below=0.4cm of offline-store]
+    {Votes stored locally in booth chain. NOT on master chain yet. SHA-256 hashed with nonce.};
+
+
+% ════════════════════════════════════════════════════
+%  PHASE III — POST-ELECTION (ADMIN)
+% ════════════════════════════════════════════════════
+
+\node (phase3) [phaselabel, below=6cm of phase2]
+    {PHASE III: POST-ELECTION};
+
+% Row 9: Election completion + merge
+\node (mark-complete) [process, right=1.5cm of phase3]
+    {Admin Marks\\Election Status:\\``\textbf{Completed}''};
+\node (merge-trigger) [process, right=1.8cm of mark-complete]
+    {Admin Triggers\\``\textbf{Merge All\\Chains}''\\(POST /api/merge)};
+\node (merge-exec) [process, right=1.8cm of merge-trigger]
+    {Booth-Local\\Blockchains\\Merged into\\Master Chain};
+\node (verify-master) [decision, right=1.8cm of merge-exec]
+    {Master Chain\\SHA-256\\Integrity\\Valid?};
+
+% Row 10: Results
+\node (results-dash) [dashbox, below=1.5cm of mark-complete]
+    {\textbf{Election Results\\Dashboard}\\(\texttt{/audit})};
+\node (pie-chart) [process, right=1.5cm of results-dash]
+    {Vote Share\\Distribution\\(Pie Chart)};
+\node (bar-chart) [process, right=1.5cm of pie-chart]
+    {Votes Per\\Candidate\\(Bar Chart)};
+\node (winner) [process, right=1.5cm of bar-chart]
+    {Winner Declared\\+ Vote \% +\\Total Votes};
+\node (explorer) [process, right=1.5cm of winner]
+    {Blockchain\\Explorer\\(Block Hashes,\\Timestamps)};
+
+\node (published) [startstop, below=1.2cm of bar-chart]
+    {Results Published\\Blockchain-Verified\\Tamper-Proof};
+
+\node (chain-fail) [startstop, above=0.8cm of verify-master]
+    {Alert: Chain\\Tampered!};
+
+% Post-election arrows
+\draw [arrow] (vote-done.south) -- ++(0,-1) -| (mark-complete.north);
+\draw [arrow] (mark-complete)  -- (merge-trigger);
+\draw [arrow] (merge-trigger)  -- (merge-exec);
+\draw [arrow] (merge-exec)     -- (verify-master);
+\draw [arrow] (verify-master.south) -- ++(0,-0.5) node[yeslabel, right] {Yes} -| (results-dash.north);
+\draw [arrow] (verify-master)  -- node[nolabel, right] {No} (chain-fail);
+
+\draw [arrow] (results-dash) -- (pie-chart);
+\draw [arrow] (pie-chart)    -- (bar-chart);
+\draw [arrow] (bar-chart)    -- (winner);
+\draw [arrow] (winner)        -- (explorer);
+\draw [arrow] (bar-chart.south) -- (published.north);
+
+% Annotations
+\node (ann-merge) [annotation, below=0.4cm of merge-exec]
+    {Merges N independent booth chains into 1 master chain. Re-validates all SHA-256 hashes.};
+\node (ann-results) [annotation, below=0.4cm of results-dash]
+    {Admin-only access. Recharts pie + bar charts. Blockchain explorer with hash trail.};
+
+% ════════════════════════════════════════════════════
+%  BACKGROUND BOXES (Phase groupings)
+% ════════════════════════════════════════════════════
+\begin{scope}[on background layer]
+    % Phase I box
+    \node[fit=(phase1)(admin-start)(admin-reject)(admin-dash)(create-booth)(assign-voter)(assign-elec)(activate)(ann1),
+          draw=blue!30, dashed, rounded corners=8pt, inner sep=12pt,
+          fill=blue!2] {};
+    % Phase II box
+    \node[fit=(phase2)(voter-arrive)(reject2)(fp-scan)(gen-did)(voter-dash)(dash-identity)(sel-elec)(sel-cand)(confirm)(reverify)(reverify-ok)(offline-store)(receipt)(vote-done)(ann-offline)(ann-vote)(ann-verify)(ann-results)(ann-identity),
+          draw=green!30, dashed, rounded corners=8pt, inner sep=12pt,
+          fill=green!2] {};
+    % Phase III box
+    \node[fit=(phase3)(mark-complete)(merge-trigger)(merge-exec)(verify-master)(chain-fail)(results-dash)(pie-chart)(bar-chart)(winner)(explorer)(published)(ann-merge)(ann-results),
+          draw=red!30, dashed, rounded corners=8pt, inner sep=12pt,
+          fill=red!2] {};
+\end{scope}
+
+\end{tikzpicture}
+}% end resizebox
+\caption{Comprehensive end-to-end system flow of BioChain Vote: a decentralized, biometric-authenticated voting system. \textbf{Phase~I} covers the administrative pre-election setup including voter registration, fingerprint enrollment, and booth creation. \textbf{Phase~II} depicts the election-day voter journey — from multi-factor biometric authentication and SSI credential generation through the five-step voting process, where votes are stored \emph{offline} in booth-local SHA-256 blockchains. \textbf{Phase~III} illustrates the post-election workflow where booth chains are merged into a single master chain for integrity verification, and election results with statistical analytics are displayed on the admin dashboard.}
+\label{fig:biochain_flow}
+\end{figure*}

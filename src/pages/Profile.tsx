@@ -1,0 +1,218 @@
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { User, Fingerprint, MapPin, Hash, Calendar, Shield, LogOut, Moon, Sun, CheckCircle2, AlertCircle, Clock, Vote, Link2, Loader2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { useAppStore } from '@/store/useAppStore';
+import { apiService } from '@/services/apiService';
+import { useNavigate } from 'react-router-dom';
+import type { VoteRecord } from '@/services/dbService';
+
+export default function ProfilePage() {
+  const { currentVoter, currentTheme, toggleTheme, logout, voteReceipts } = useAppStore();
+  const navigate = useNavigate();
+  const [voterVotes, setVoterVotes] = useState<VoteRecord[]>([]);
+  const [blockchainValid, setBlockchainValid] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (currentVoter) {
+      apiService.getVotesByVoter(currentVoter.id).then(setVoterVotes);
+      apiService.verifyBlockchain().then(setBlockchainValid).catch(() => setBlockchainValid(null));
+    }
+  }, [currentVoter]);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
+
+  if (!currentVoter) {
+    return (
+      <div className="p-4 md:p-8 max-w-4xl mx-auto text-center py-20 space-y-4">
+        <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
+        <p className="text-foreground">Please authenticate first.</p>
+        <Button onClick={() => navigate('/')}>Go to Login</Button>
+      </div>
+    );
+  }
+
+  const hasFingerprint = !!(currentVoter.fingerprint && currentVoter.fingerprint.length > 0);
+  const hasNitgenFingerprint = !!(currentVoter.fingerprint && currentVoter.fingerprint.startsWith('NITGEN:'));
+
+  return (
+    <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+        <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">Profile & Settings</h1>
+        <p className="text-sm text-muted-foreground">Your voter profile and system settings</p>
+      </motion.div>
+
+      {/* Profile Card */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+        <Card className="glass border-border/50 overflow-hidden">
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 via-white to-green-600 opacity-60" />
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                <User className="w-10 h-10 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-xl font-display font-bold text-foreground">{currentVoter.name}</h2>
+                <p className="text-sm text-muted-foreground">{currentVoter.constituency || 'No constituency assigned'}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success border-biochain-success/30 text-[10px]">
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Verified Voter
+                  </Badge>
+                  {currentVoter.hasVoted && (
+                    <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px]">
+                      <Vote className="w-3 h-3 mr-1" /> Voted
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="w-3 h-3" /> Voter ID</p>
+                <p className="text-sm font-mono text-foreground">{currentVoter.voterIdNumber || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" /> Constituency</p>
+                <p className="text-sm text-foreground">{currentVoter.constituency || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Registered</p>
+                <p className="text-sm text-foreground">{currentVoter.registeredAt ? new Date(currentVoter.registeredAt).toLocaleDateString() : 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1"><Link2 className="w-3 h-3" /> Blockchain Status</p>
+                <p className="text-sm text-foreground flex items-center gap-1.5">
+                  {blockchainValid === true ? (
+                    <><CheckCircle2 className="w-3.5 h-3.5 text-biochain-success" /> Valid</>
+                  ) : blockchainValid === false ? (
+                    <><AlertCircle className="w-3.5 h-3.5 text-destructive" /> Tampered</>
+                  ) : (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" /> Checking...</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Biometric Status */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-base font-display flex items-center gap-2">
+              <Fingerprint className="w-5 h-5 text-primary" /> Biometric Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
+              <div className="flex items-center gap-3">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${hasNitgenFingerprint ? 'bg-biochain-success/10' : 'bg-destructive/10'}`}>
+                  <Fingerprint className={`w-4 h-4 ${hasNitgenFingerprint ? 'text-biochain-success' : 'text-destructive'}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Fingerprint Sensor</p>
+                  <p className="text-xs text-muted-foreground">
+                    {hasNitgenFingerprint ? 'NITGEN Scanner • Enrolled' : hasFingerprint ? 'Simulated Enrollment' : 'Not enrolled'}
+                  </p>
+                </div>
+              </div>
+              <Badge className={hasFingerprint
+                ? 'bg-biochain-success/20 text-biochain-success border-biochain-success/30'
+                : 'bg-destructive/20 text-destructive border-destructive/30'
+              }>
+                {hasFingerprint ? 'Enrolled' : 'Not Enrolled'}
+              </Badge>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Vote History from DB */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-base font-display flex items-center gap-2">
+              <Vote className="w-5 h-5 text-biochain-warning" /> Vote History
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {voterVotes.length === 0 && voteReceipts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No votes cast yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {(voteReceipts.length > 0 ? voteReceipts : voterVotes).map((vote: any) => (
+                  <div key={vote.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/20">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-4 h-4 text-biochain-success" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {vote.electionTitle || `Election: ${vote.electionId}`}
+                        </p>
+                        {vote.candidateName && (
+                          <p className="text-[10px] text-primary">Candidate: {vote.candidateName}</p>
+                        )}
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          Block #{vote.blockNumber || vote.blockIndex} • {(vote.transactionHash || vote.blockHash || '').slice(0, 16)}...
+                        </p>
+                      </div>
+                    </div>
+                    <Badge className="bg-biochain-success/20 text-biochain-success text-[10px]">
+                      {vote.status || 'confirmed'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Settings */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
+        <Card className="glass border-border/50">
+          <CardHeader>
+            <CardTitle className="text-base font-display">Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {currentTheme === 'dark' ? <Moon className="w-4 h-4 text-muted-foreground" /> : <Sun className="w-4 h-4 text-biochain-warning" />}
+                <div>
+                  <p className="text-sm font-medium text-foreground">Dark Mode</p>
+                  <p className="text-xs text-muted-foreground">Toggle between dark and light themes</p>
+                </div>
+              </div>
+              <Switch checked={currentTheme === 'dark'} onCheckedChange={toggleTheme} />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Shield className="w-4 h-4 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">Security Level</p>
+                  <p className="text-xs text-muted-foreground">Biometric + blockchain verification</p>
+                </div>
+              </div>
+              <Badge variant="outline" className="bg-biochain-success/10 text-biochain-success">Maximum</Badge>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Logout */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}>
+        <Button variant="outline" onClick={handleLogout} className="w-full border-destructive/30 text-destructive hover:bg-destructive/10">
+          <LogOut className="w-4 h-4 mr-2" /> Sign Out
+        </Button>
+      </motion.div>
+    </div>
+  );
+}

@@ -1,0 +1,342 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 520" font-family="'Times New Roman', Times, serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#000"/>
+    </marker>
+  </defs>
+
+  <!-- Phase I Header -->
+  <rect x="4" y="4" width="218" height="16" fill="#000"/>
+  <text x="113" y="16" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="bold">PHASE I: PRE-ELECTION SETUP (Admin)</text>
+
+  <!-- Admin Login -->
+  <rect x="4" y="24" width="90" height="28" rx="10" fill="#eee" stroke="#000" stroke-width="0.8"/>
+  <text x="49" y="36" text-anchor="middle" font-size="6.5" font-weight="bold">Election Officer</text>
+  <text x="49" y="45" text-anchor="middle" font-size="6">(Admin Login)</text>
+
+  <line x1="94" y1="38" x2="108" y2="38" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Register + Enroll -->
+  <rect x="110" y="24" width="110" height="28" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="165" y="35" text-anchor="middle" font-size="6">Register Voters &amp;</text>
+  <text x="165" y="44" text-anchor="middle" font-size="6">Enroll Fingerprints</text>
+
+  <!-- Phase I Row 2 -->
+  <path d="M165 52 L165 58 L49 58 L49 64" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Create Elections + Candidates -->
+  <rect x="4" y="66" width="110" height="28" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="59" y="77" text-anchor="middle" font-size="6">Create Elections,</text>
+  <text x="59" y="86" text-anchor="middle" font-size="6">Candidates &amp; Booths</text>
+
+  <line x1="114" y1="80" x2="128" y2="80" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Assign + Activate -->
+  <rect x="130" y="66" width="90" height="28" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="175" y="77" text-anchor="middle" font-size="6">Assign Voters/</text>
+  <text x="175" y="86" text-anchor="middle" font-size="6">Elections to Booths</text>
+
+  <!-- ═══════════ PHASE II ═══════════ -->
+  <!-- Phase II Header -->
+  <rect x="4" y="104" width="218" height="16" fill="#000"/>
+  <text x="113" y="116" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="bold">PHASE II: ELECTION DAY (Voter)</text>
+
+  <!-- Voter Arrives -->
+  <rect x="4" y="124" width="82" height="24" rx="10" fill="#eee" stroke="#000" stroke-width="0.8"/>
+  <text x="45" y="134" text-anchor="middle" font-size="6" font-weight="bold">Voter Arrives</text>
+  <text x="45" y="142" text-anchor="middle" font-size="5.5">at Polling Booth</text>
+
+  <line x1="86" y1="136" x2="100" y2="136" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Select Identity -->
+  <rect x="102" y="124" width="70" height="24" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="137" y="134" text-anchor="middle" font-size="6">Select Identity</text>
+  <text x="137" y="142" text-anchor="middle" font-size="5.5">(Voter ID)</text>
+
+  <line x1="172" y1="136" x2="186" y2="136" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Voter ID Valid? -->
+  <polygon points="215,120 244,136 215,152 186,136" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="215" y="134" text-anchor="middle" font-size="5.5">Valid?</text>
+
+  <!-- No -->
+  <line x1="215" y1="120" x2="215" y2="111" stroke="#000" stroke-width="0.6" marker-end="url(#a)"/>
+  <text x="220" y="117" font-size="5" font-style="italic">No</text>
+  <rect x="195" y="101" width="40" height="12" rx="3" fill="#ddd" stroke="#000" stroke-width="0.5"/>
+  <text x="215" y="110" text-anchor="middle" font-size="5">Denied</text>
+
+  <!-- Yes down -->
+  <path d="M244 136 L255 136 L255 165 L45 165 L45 172" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+  <text x="248" y="133" font-size="5" font-style="italic">Yes</text>
+
+  <!-- ── Biometric Row ── -->
+  <!-- Fingerprint -->
+  <rect x="4" y="174" width="80" height="28" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="44" y="184" text-anchor="middle" font-size="6" font-weight="bold">Fingerprint Scan</text>
+  <text x="44" y="193" text-anchor="middle" font-size="5.5">(Nitgen Sensor)</text>
+
+  <line x1="84" y1="188" x2="97" y2="188" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Match? -->
+  <polygon points="125,174 150,188 125,202 100,188" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="125" y="187" text-anchor="middle" font-size="5">Match?</text>
+
+  <!-- Yes -->
+  <line x1="150" y1="188" x2="164" y2="188" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+  <text x="155" y="184" font-size="5" font-style="italic">Y</text>
+
+  <!-- No to Denied -->
+  <path d="M125 174 L125 168 L215 168 L215 113" fill="none" stroke="#000" stroke-width="0.5" stroke-dasharray="2,1.5" marker-end="url(#a)"/>
+
+  <!-- Face Recognition -->
+  <rect x="166" y="174" width="76" height="28" rx="2" fill="#fff" stroke="#000" stroke-width="0.7" stroke-dasharray="3,1.5"/>
+  <text x="204" y="184" text-anchor="middle" font-size="6">Face Recognition</text>
+  <text x="204" y="194" text-anchor="middle" font-size="5" font-style="italic">(Future)</text>
+
+  <!-- Arrow down from Face -->
+  <path d="M204 202 L204 210 L44 210 L44 218" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+  <text x="208" y="208" font-size="5" font-style="italic">Y</text>
+
+  <!-- ── SSI + Dashboard ── -->
+  <rect x="4" y="220" width="80" height="22" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="44" y="229" text-anchor="middle" font-size="5.5">Generate DID/SSI</text>
+  <text x="44" y="237" text-anchor="middle" font-size="5">(SHA-256)</text>
+
+  <line x1="84" y1="231" x2="98" y2="231" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Voter Dashboard -->
+  <rect x="100" y="218" width="125" height="26" rx="3" fill="#eee" stroke="#000" stroke-width="0.9"/>
+  <text x="162" y="229" text-anchor="middle" font-size="6.5" font-weight="bold">Voter Dashboard</text>
+  <text x="162" y="238" text-anchor="middle" font-size="5" font-style="italic">Vote | Verify | Results | Identity</text>
+
+  <!-- Arrow down to voting flow -->
+  <path d="M162 244 L162 254" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- ── 5-Step Voting Sub-flow ── -->
+  <!-- Step boxes in a row -->
+  <rect x="4" y="256" width="54" height="22" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="31" y="265" text-anchor="middle" font-size="5.5" font-weight="bold">1. Select</text>
+  <text x="31" y="273" text-anchor="middle" font-size="5.5">Election</text>
+
+  <line x1="58" y1="267" x2="66" y2="267" stroke="#000" stroke-width="0.6" marker-end="url(#a)"/>
+
+  <rect x="68" y="256" width="54" height="22" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="95" y="265" text-anchor="middle" font-size="5.5" font-weight="bold">2. Select</text>
+  <text x="95" y="273" text-anchor="middle" font-size="5.5">Candidate</text>
+
+  <line x1="122" y1="267" x2="130" y2="267" stroke="#000" stroke-width="0.6" marker-end="url(#a)"/>
+
+  <!-- Confirm diamond -->
+  <polygon points="152,256 170,267 152,278 134,267" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="152" y="265" text-anchor="middle" font-size="4.5" font-weight="bold">3.</text>
+  <text x="152" y="272" text-anchor="middle" font-size="4.5">OK?</text>
+
+  <line x1="170" y1="267" x2="178" y2="267" stroke="#000" stroke-width="0.6" marker-end="url(#a)"/>
+  <text x="173" y="263" font-size="4" font-style="italic">Y</text>
+
+  <!-- No back loop -->
+  <path d="M152 278 L152 283 L95 283 L95 278" fill="none" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+  <text x="125" y="282" font-size="4" font-style="italic">N</text>
+
+  <!-- Step 4: Re-verify -->
+  <rect x="180" y="256" width="58" height="22" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="209" y="265" text-anchor="middle" font-size="5.5" font-weight="bold">4. Biometric</text>
+  <text x="209" y="273" text-anchor="middle" font-size="5.5">Re-verify</text>
+
+  <!-- Arrow down -->
+  <path d="M209 278 L209 288 L80 288 L80 296" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- ── Offline Storage Row ── -->
+  <!-- Passed? diamond -->
+  <polygon points="80,296 102,307 80,318 58,307" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="80" y="306" text-anchor="middle" font-size="4.5">Pass?</text>
+
+  <line x1="102" y1="307" x2="115" y2="307" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+  <text x="107" y="303" font-size="4" font-style="italic">Y</text>
+
+  <!-- No retry -->
+  <path d="M80 318 L80 322 L209 322 L209 278" fill="none" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+  <text x="88" y="321" font-size="4" font-style="italic">N</text>
+
+  <!-- Offline SHA-256 Database (cylinder) -->
+  <ellipse cx="152" cy="296" rx="36" ry="6" fill="#ddd" stroke="#000" stroke-width="0.6"/>
+  <rect x="116" y="296" width="72" height="22" fill="#ddd" stroke="none"/>
+  <line x1="116" y1="296" x2="116" y2="318" stroke="#000" stroke-width="0.6"/>
+  <line x1="188" y1="296" x2="188" y2="318" stroke="#000" stroke-width="0.6"/>
+  <ellipse cx="152" cy="318" rx="36" ry="6" fill="#ddd" stroke="#000" stroke-width="0.6"/>
+  <text x="152" y="306" text-anchor="middle" font-size="5.5" font-weight="bold">Vote Stored OFFLINE</text>
+  <text x="152" y="314" text-anchor="middle" font-size="5">Booth-Local SHA-256 Chain</text>
+
+  <line x1="188" y1="307" x2="202" y2="307" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Receipt -->
+  <rect x="204" y="296" width="56" height="22" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="232" y="305" text-anchor="middle" font-size="5.5" font-weight="bold">Receipt</text>
+  <text x="232" y="313" text-anchor="middle" font-size="5">(Block # + Hash)</text>
+
+
+  <!-- ═══════════ PHASE III ═══════════ -->
+  <!-- Phase III Header -->
+  <rect x="4" y="336" width="218" height="16" fill="#000"/>
+  <text x="113" y="348" text-anchor="middle" fill="#fff" font-size="7.5" font-weight="bold">PHASE III: POST-ELECTION (Admin)</text>
+
+  <!-- Arrow from Phase II to Phase III -->
+  <path d="M232 318 L232 330 L30 330 L30 356" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Mark Completed -->
+  <rect x="4" y="358" width="82" height="24" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="45" y="368" text-anchor="middle" font-size="6">Admin Sets Status:</text>
+  <text x="45" y="377" text-anchor="middle" font-size="6" font-weight="bold">"Completed"</text>
+
+  <line x1="86" y1="370" x2="98" y2="370" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Merge All Chains -->
+  <rect x="100" y="358" width="74" height="24" rx="2" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="137" y="367" text-anchor="middle" font-size="5.5" font-weight="bold">Merge All</text>
+  <text x="137" y="376" text-anchor="middle" font-size="5.5" font-weight="bold">Booth Chains</text>
+
+  <line x1="174" y1="370" x2="186" y2="370" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Master Chain Valid? -->
+  <polygon points="215,356 244,370 215,384 186,370" fill="#fff" stroke="#000" stroke-width="0.7"/>
+  <text x="215" y="367" text-anchor="middle" font-size="4.5">SHA-256</text>
+  <text x="215" y="375" text-anchor="middle" font-size="4.5">Valid?</text>
+
+  <!-- No -->
+  <line x1="215" y1="356" x2="215" y2="348" stroke="#000" stroke-width="0.6"/>
+  <text x="220" y="352" font-size="4" font-style="italic">N</text>
+  <rect x="195" y="336" width="40" height="12" rx="3" fill="#ddd" stroke="#000" stroke-width="0.5"/>
+  <text x="215" y="345" text-anchor="middle" font-size="5">Alert!</text>
+
+  <!-- Yes down -->
+  <path d="M244 370 L255 370 L255 400 L45 400 L45 406" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+  <text x="248" y="367" font-size="5" font-style="italic">Y</text>
+
+  <!-- ── Results Row ── -->
+  <!-- Results Dashboard -->
+  <rect x="4" y="408" width="88" height="26" rx="3" fill="#eee" stroke="#000" stroke-width="0.9"/>
+  <text x="48" y="419" text-anchor="middle" font-size="6.5" font-weight="bold">Results Dashboard</text>
+  <text x="48" y="428" text-anchor="middle" font-size="5" font-style="italic">(Admin Only)</text>
+
+  <line x1="92" y1="421" x2="104" y2="421" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Analytics boxes -->
+  <rect x="106" y="410" width="50" height="20" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="131" y="419" text-anchor="middle" font-size="5">Pie Chart</text>
+  <text x="131" y="426" text-anchor="middle" font-size="5">Bar Chart</text>
+
+  <line x1="156" y1="420" x2="164" y2="420" stroke="#000" stroke-width="0.6" marker-end="url(#a)"/>
+
+  <rect x="166" y="410" width="50" height="20" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="191" y="419" text-anchor="middle" font-size="5.5" font-weight="bold">Winner</text>
+  <text x="191" y="426" text-anchor="middle" font-size="5">Declared</text>
+
+  <!-- Arrow down -->
+  <path d="M131 430 L131 440" fill="none" stroke="#000" stroke-width="0.7" marker-end="url(#a)"/>
+
+  <!-- Final: Published -->
+  <rect x="68" y="442" width="128" height="22" rx="10" fill="#eee" stroke="#000" stroke-width="0.8"/>
+  <text x="132" y="452" text-anchor="middle" font-size="6" font-weight="bold">Results Published</text>
+  <text x="132" y="460" text-anchor="middle" font-size="5">Blockchain-Verified, Tamper-Proof</text>
+
+  <!-- ═══════════ LEGEND ═══════════ -->
+  <rect x="240" y="4" width="436" height="460" rx="0" fill="none" stroke="#000" stroke-width="0" stroke-dasharray="none"/>
+
+  <!-- Right side: Compact legend at bottom-right -->
+  <text x="262" y="440" font-size="6.5" font-weight="bold">Legend:</text>
+  <rect x="262" y="445" width="20" height="10" rx="6" fill="#eee" stroke="#000" stroke-width="0.5"/>
+  <text x="286" y="453" font-size="5.5">Start/End</text>
+  <rect x="330" y="445" width="20" height="10" rx="1" fill="#fff" stroke="#000" stroke-width="0.5"/>
+  <text x="354" y="453" font-size="5.5">Process</text>
+  <polygon points="409,445 419,450 409,455 399,450" fill="#fff" stroke="#000" stroke-width="0.5"/>
+  <text x="424" y="453" font-size="5.5">Decision</text>
+  <ellipse cx="480" cy="448" rx="12" ry="4" fill="#ddd" stroke="#000" stroke-width="0.4"/>
+  <text x="496" y="453" font-size="5.5">Database</text>
+  <rect x="538" y="445" width="20" height="10" rx="1" fill="#fff" stroke="#000" stroke-width="0.5" stroke-dasharray="2,1"/>
+  <text x="562" y="453" font-size="5.5">Future</text>
+
+  <!-- ═══════════ RIGHT SIDE: SYSTEM ARCHITECTURE SUMMARY ═══════════ -->
+  <!-- Clean box on the right with key system components -->
+  <rect x="248" y="4" width="200" height="96" rx="3" fill="none" stroke="#000" stroke-width="0.8"/>
+  <rect x="248" y="4" width="200" height="14" rx="3" fill="#000"/>
+  <text x="348" y="14" text-anchor="middle" fill="#fff" font-size="6.5" font-weight="bold">KEY SYSTEM COMPONENTS</text>
+
+  <text x="256" y="30" font-size="6" font-weight="bold">Authentication Layer</text>
+  <text x="260" y="39" font-size="5.5">• Voter ID Card Validation</text>
+  <text x="260" y="47" font-size="5.5">• Fingerprint Biometric (Nitgen HW)</text>
+  <text x="260" y="55" font-size="5.5">• Facial Recognition (Future)</text>
+  <text x="260" y="63" font-size="5.5">• DID/SSI Credentials (SHA-256)</text>
+
+  <text x="256" y="75" font-size="6" font-weight="bold">Blockchain Layer</text>
+  <text x="260" y="84" font-size="5.5">• Booth-local offline SHA-256 chains</text>
+  <text x="260" y="92" font-size="5.5">• Post-election merge → Master chain</text>
+
+  <!-- Voter Dashboard Detail Box -->
+  <rect x="248" y="108" width="200" height="78" rx="3" fill="none" stroke="#000" stroke-width="0.8"/>
+  <rect x="248" y="108" width="200" height="14" rx="3" fill="#000"/>
+  <text x="348" y="118" text-anchor="middle" fill="#fff" font-size="6.5" font-weight="bold">VOTER DASHBOARD PAGES</text>
+
+  <text x="256" y="132" font-size="5.5" font-weight="bold">/vote</text>
+  <text x="286" y="132" font-size="5.5">— 4-step voting: Election → Candidate</text>
+  <text x="296" y="140" font-size="5.5">→ Confirm → Biometric Re-verify</text>
+
+  <text x="256" y="151" font-size="5.5" font-weight="bold">/verify</text>
+  <text x="289" y="151" font-size="5.5">— Search vote by block hash/#</text>
+
+  <text x="256" y="162" font-size="5.5" font-weight="bold">/audit</text>
+  <text x="286" y="162" font-size="5.5">— Election results (Admin only)</text>
+
+  <text x="256" y="173" font-size="5.5" font-weight="bold">/identity</text>
+  <text x="298" y="173" font-size="5.5">— DID, QR code, SSI credentials</text>
+
+  <!-- Admin Dashboard Detail Box -->
+  <rect x="248" y="194" width="200" height="66" rx="3" fill="none" stroke="#000" stroke-width="0.8"/>
+  <rect x="248" y="194" width="200" height="14" rx="3" fill="#000"/>
+  <text x="348" y="204" text-anchor="middle" fill="#fff" font-size="6.5" font-weight="bold">ADMIN DASHBOARD TABS</text>
+
+  <text x="256" y="220" font-size="5.5" font-weight="bold">Voters</text>
+  <text x="284" y="220" font-size="5.5">— Register, edit, enroll fingerprint</text>
+  <text x="256" y="231" font-size="5.5" font-weight="bold">Elections</text>
+  <text x="296" y="231" font-size="5.5">— Create, activate, complete</text>
+  <text x="256" y="242" font-size="5.5" font-weight="bold">Candidates</text>
+  <text x="304" y="242" font-size="5.5">— Add with party/manifesto</text>
+  <text x="256" y="253" font-size="5.5" font-weight="bold">Booths</text>
+  <text x="284" y="253" font-size="5.5">— Create, assign, merge chains</text>
+
+  <!-- Data Flow Summary Box -->
+  <rect x="248" y="268" width="200" height="90" rx="3" fill="none" stroke="#000" stroke-width="0.8"/>
+  <rect x="248" y="268" width="200" height="14" rx="3" fill="#000"/>
+  <text x="348" y="278" text-anchor="middle" fill="#fff" font-size="6.5" font-weight="bold">VOTE DATA FLOW</text>
+
+  <!-- Mini flow diagram -->
+  <rect x="294" y="290" width="108" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="348" y="300" text-anchor="middle" font-size="5.5">1. Vote cast at booth</text>
+
+  <line x1="348" y1="304" x2="348" y2="310" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+
+  <rect x="276" y="312" width="144" height="14" rx="2" fill="#ddd" stroke="#000" stroke-width="0.6"/>
+  <text x="348" y="322" text-anchor="middle" font-size="5.5" font-weight="bold">2. Stored OFFLINE in booth chain (SHA-256)</text>
+
+  <line x1="348" y1="326" x2="348" y2="332" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+
+  <rect x="282" y="334" width="132" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="348" y="344" text-anchor="middle" font-size="5.5">3. Election ends → Admin merges chains</text>
+
+  <line x1="348" y1="348" x2="348" y2="354" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+
+  <rect x="282" y="356" width="132" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="348" y="366" text-anchor="middle" font-size="5.5">4. Master chain integrity verified</text>
+
+  <line x1="348" y1="370" x2="348" y2="376" stroke="#000" stroke-width="0.5" marker-end="url(#a)"/>
+
+  <rect x="282" y="378" width="132" height="14" rx="2" fill="#fff" stroke="#000" stroke-width="0.6"/>
+  <text x="348" y="388" text-anchor="middle" font-size="5.5">5. Results &amp; analytics displayed</text>
+
+  <!-- Post-Election Analytics Box -->
+  <rect x="248" y="400" width="200" height="34" rx="3" fill="none" stroke="#000" stroke-width="0.8"/>
+  <rect x="248" y="400" width="200" height="14" rx="3" fill="#000"/>
+  <text x="348" y="410" text-anchor="middle" fill="#fff" font-size="6.5" font-weight="bold">ELECTION ANALYTICS</text>
+  <text x="260" y="424" font-size="5.5">Pie chart (vote share) • Bar chart (per candidate)</text>
+  <text x="260" y="432" font-size="5.5">Winner declaration • Blockchain explorer (hashes)</text>
+
+</svg>

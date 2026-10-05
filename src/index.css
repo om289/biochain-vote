@@ -1,0 +1,191 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 214 100% 6%;
+    --foreground: 210 40% 95%;
+
+    --card: 214 80% 10%;
+    --card-foreground: 210 40% 95%;
+
+    --popover: 214 80% 10%;
+    --popover-foreground: 210 40% 95%;
+
+    --primary: 210 100% 56%;
+    --primary-foreground: 214 100% 6%;
+
+    --secondary: 214 60% 16%;
+    --secondary-foreground: 210 40% 95%;
+
+    --muted: 214 40% 14%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 214 60% 16%;
+    --accent-foreground: 210 40% 95%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 40% 18%;
+    --input: 214 40% 18%;
+    --ring: 210 100% 56%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 214 80% 8%;
+    --sidebar-foreground: 210 40% 85%;
+    --sidebar-primary: 210 100% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 60% 14%;
+    --sidebar-accent-foreground: 210 40% 95%;
+    --sidebar-border: 214 40% 16%;
+    --sidebar-ring: 210 100% 56%;
+
+    /* Custom BioChain tokens */
+    --biochain-deep: 214 100% 6%;
+    --biochain-navy: 214 80% 13%;
+    --biochain-accent: 210 100% 56%;
+    --biochain-glow: 200 100% 60%;
+    --biochain-success: 152 69% 50%;
+    --biochain-warning: 38 92% 50%;
+    --biochain-cyber: 270 100% 65%;
+  }
+
+  .light {
+    --background: 48 20% 98%;
+    --foreground: 225 30% 14%;
+
+    --card: 45 20% 97%;
+    --card-foreground: 225 30% 14%;
+
+    --popover: 45 20% 97%;
+    --popover-foreground: 225 30% 14%;
+
+    --primary: 225 60% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 225 15% 93%;
+    --secondary-foreground: 225 30% 18%;
+
+    --muted: 225 12% 93%;
+    --muted-foreground: 225 10% 48%;
+
+    --accent: 225 15% 93%;
+    --accent-foreground: 225 30% 18%;
+
+    --destructive: 0 65% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 225 15% 88%;
+    --input: 225 15% 88%;
+    --ring: 225 60% 40%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 45 15% 96%;
+    --sidebar-foreground: 225 20% 28%;
+    --sidebar-primary: 225 50% 35%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 225 12% 93%;
+    --sidebar-accent-foreground: 225 30% 18%;
+    --sidebar-border: 225 15% 88%;
+    --sidebar-ring: 225 60% 40%;
+
+    /* Light-mode BioChain tokens */
+    --biochain-deep: 225 25% 95%;
+    --biochain-navy: 225 20% 90%;
+    --biochain-accent: 225 60% 40%;
+    --biochain-glow: 195 55% 38%;
+    --biochain-success: 160 55% 36%;
+    --biochain-warning: 38 70% 48%;
+    --biochain-cyber: 260 45% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', sans-serif;
+  }
+}
+
+/* Glassmorphism utility — dark mode */
+.glass {
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+/* Glassmorphism — light mode: frosted ivory */
+.light .glass {
+  background: hsl(var(--card) / 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--border) / 0.7);
+  box-shadow: 0 1px 3px hsl(225 30% 14% / 0.04), 0 4px 12px hsl(225 30% 14% / 0.03);
+}
+
+/* Glow effects — dark mode */
+.glow-primary {
+  box-shadow: 0 0 20px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.1);
+}
+
+.glow-success {
+  box-shadow: 0 0 20px hsl(var(--biochain-success) / 0.3), 0 0 60px hsl(var(--biochain-success) / 0.1);
+}
+
+/* Glow effects — light mode: refined shadow instead of neon */
+.light .glow-primary {
+  box-shadow: 0 2px 8px hsl(var(--primary) / 0.12), 0 1px 3px hsl(var(--primary) / 0.08);
+}
+
+.light .glow-success {
+  box-shadow: 0 2px 8px hsl(var(--biochain-success) / 0.12), 0 1px 3px hsl(var(--biochain-success) / 0.08);
+}
+
+/* Pulse animation for scanner */
+@keyframes scanner-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+@keyframes scan-line {
+  0% { top: 0%; }
+  50% { top: 100%; }
+  100% { top: 0%; }
+}
+
+.animate-scanner-pulse {
+  animation: scanner-pulse 2s ease-in-out infinite;
+}
+
+.animate-scan-line {
+  animation: scan-line 3s ease-in-out infinite;
+}
+
+/* Gradient text — dark mode */
+.text-gradient {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--biochain-glow)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Gradient text — light mode: deeper indigo-to-teal */
+.light .text-gradient {
+  background: linear-gradient(135deg, hsl(225 60% 38%), hsl(195 55% 35%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

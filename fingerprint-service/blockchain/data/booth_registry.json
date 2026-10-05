@@ -1,0 +1,22 @@
+[
+    {
+        "booth_id": "01",
+        "name": "1",
+        "constituency": "mumbai"
+    },
+    {
+        "booth_id": "2",
+        "name": "2",
+        "constituency": "1"
+    },
+    {
+        "booth_id": "03",
+        "name": "ward 3",
+        "constituency": "mumbai"
+    },
+    {
+        "booth_id": "04",
+        "name": "ward 4",
+        "constituency": "mumbai sector 4"
+    }
+]

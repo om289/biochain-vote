@@ -1,0 +1,57 @@
+flowchart TD
+    %% ════════════ PHASE I: PRE-ELECTION SETUP ════════════
+    subgraph P1["<b>PHASE I: PRE-ELECTION SETUP (Admin)</b>"]
+        A1([Election Officer]) --> A2[Enter Admin PIN]
+        A2 --> A3{PIN Valid?}
+        A3 -- No --> A4([Access Denied])
+        A3 -- Yes --> A5[Admin Dashboard<br/><i>Voters | Elections | Candidates | Booths</i>]
+        A5 --> A6[Register Voters &<br/>Enroll Fingerprints<br/><i>Nitgen Sensor via Flask API</i>]
+        A6 --> A7[Create Elections &<br/>Add Candidates]
+        A7 --> A8[Create Polling Booths<br/><i>Each booth gets own blockchain</i>]
+        A8 --> A9[Assign Voters &<br/>Elections to Booths]
+        A9 --> A10[Set Election Status:<br/><b>Active</b>]
+    end
+
+    %% ════════════ PHASE II: ELECTION DAY ════════════
+    subgraph P2["<b>PHASE II: ELECTION DAY (Voter)</b>"]
+        B1([Voter Arrives at<br/>Polling Booth]) --> B2[Select Identity<br/>from Voter Roll<br/><i>Voter ID, Name, Constituency</i>]
+        B2 --> B3{Voter ID<br/>Valid?}
+        B3 -- No --> B4([Access Denied])
+        B3 -- Yes --> B5[Fingerprint Biometric Scan<br/><i>Nitgen Hardware Sensor</i>]
+        B5 --> B6{Fingerprint<br/>Match?}
+        B6 -- No --> B4
+        B6 -- Yes --> B7[Face Recognition<br/><i>Future Enhancement</i>]
+        B7 --> B8{Face<br/>Match?}
+        B8 -- No --> B4
+        B8 -- Yes --> B9[Generate DID / SSI Credential<br/><i>SHA-256 of Voter UUID</i>]
+        B9 --> B10[<b>Voter Dashboard</b><br/><i>/vote · /verify · /audit · /identity</i>]
+
+        B10 --> C1[<b>Step 1:</b> Select<br/>Active Election]
+        C1 --> C2[<b>Step 2:</b> Select<br/>Candidate]
+        C2 --> C3{<b>Step 3:</b><br/>Confirm Vote?}
+        C3 -- No --> C2
+        C3 -- Yes --> C4[<b>Step 4:</b> Biometric<br/>Re-verification<br/><i>Fingerprint / Touch ID</i>]
+        C4 --> C5{Re-verification<br/>Passed?}
+        C5 -- No --> C4
+        C5 -- Yes --> C6[(Vote Stored <b>OFFLINE</b><br/>in Booth-Local<br/>SHA-256 Blockchain)]
+        C6 --> C7[Digital Receipt Issued<br/><i>Block # + Hash</i>]
+        C7 --> C8([Voter Can Verify<br/>Vote on Ledger])
+    end
+
+    %% ════════════ PHASE III: POST-ELECTION ════════════
+    subgraph P3["<b>PHASE III: POST-ELECTION (Admin)</b>"]
+        D1[Admin Marks Election<br/>Status: <b>Completed</b>] --> D2[Trigger <b>Merge All<br/>Booth Chains</b><br/><i>POST /api/merge</i>]
+        D2 --> D3[Booth-Local Blockchains<br/>Merged into Master Chain]
+        D3 --> D4{Master Chain<br/>SHA-256<br/>Integrity Valid?}
+        D4 -- No --> D5([Alert: Chain Tampered!])
+        D4 -- Yes --> D6[<b>Election Results Dashboard</b><br/><i>/audit</i>]
+        D6 --> D7[Vote Share Distribution<br/><i>Pie Chart</i>]
+        D6 --> D8[Votes Per Candidate<br/><i>Bar Chart</i>]
+        D6 --> D9[<b>Winner Declared</b><br/><i>Vote % + Total Votes</i>]
+        D6 --> D10[Blockchain Explorer<br/><i>Hashes, Timestamps</i>]
+        D7 & D8 & D9 & D10 --> D11([Results Published<br/><b>Blockchain-Verified · Tamper-Proof</b>])
+    end
+
+    %% ════════════ PHASE CONNECTIONS ════════════
+    A10 ==> B1
+    C8 ==> D1
