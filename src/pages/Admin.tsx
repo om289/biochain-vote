@@ -839,10 +839,16 @@ function BoothSyncPanel() {
     try {
       const booth = booths.find(b => b.booth_id === boothId);
       const electionId = (booth?.assigned_elections || [])[0];
+      if (!electionId) {
+        toast.error('No election assigned to this booth. Assign an election first.');
+        setForkingBooth(null);
+        return;
+      }
       await apiService.forkBoothChain(boothId, electionId);
+      toast.success(`Booth ${booth?.name || boothId} forked successfully`);
       await load();
     } catch (e: any) {
-      console.error('Fork failed:', e);
+      toast.error(`Fork failed: ${e.message}`);
     }
     setForkingBooth(null);
   };
@@ -1600,10 +1606,16 @@ function BoothManager() {
     try {
       const targetBooth = booths.find(b => b.booth_id === boothId);
       const electionId = (targetBooth?.assigned_elections || [])[0];
+      if (!electionId) {
+        toast.error('No election assigned to this booth. Assign an election first.');
+        setForkingBooth(null);
+        return;
+      }
       await apiService.forkBoothChain(boothId, electionId);
+      toast.success(`Booth ${targetBooth?.name || boothId} anchored to master chain`);
       await load();
     } catch (e: any) {
-      alert(`Fork failed: ${e.message}`);
+      toast.error(`Fork failed: ${e.message}`);
     } finally {
       setForkingBooth(null);
     }

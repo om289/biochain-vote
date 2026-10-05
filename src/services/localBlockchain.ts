@@ -516,6 +516,16 @@ export const localBlockchain = {
     return { valid: true, totalBlocks: chain.length };
   },
 
+  /** Return all master chain blocks (alias for getChain) */
+  async getMasterChain(): Promise<Block[]> {
+    return _masterGetAll();
+  },
+
+  /** Verify master chain integrity — returns same shape as verifyChain */
+  async verifyMasterChain(): Promise<{ valid: boolean; totalBlocks: number; invalidBlockIndex?: number; error?: string }> {
+    return this.verifyChain();
+  },
+
   // ── Booth sub-chain — Merkle ──────────────────────────────────────────────────
 
   /** Build Merkle tree from all vote blocks in a booth sub-chain */
