@@ -1,5 +1,7 @@
-flask
-flask-cors
-requests
-pythonnet
-python-dotenv
+# Pin versions to avoid breaking changes, especially pythonnet 2.x vs 3.x
+flask==3.0.3
+flask-cors==4.0.1
+requests==2.32.3
+pythonnet==3.0.3
+python-dotenv==1.0.1
+gunicorn==22.0.0

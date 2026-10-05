@@ -1,9 +1,12 @@
 import time
 import hashlib
+import threading
 from typing import List, Optional
 from .models import Block, VoteTransaction
 from .storage import BlockchainStorage
 from .config import MINING_DIFFICULTY, logger
+
+_chain_lock = threading.Lock()
 
 class Blockchain:
     def __init__(self):
@@ -33,15 +36,16 @@ class Blockchain:
 
     def add_vote(self, voter_id: str, candidate_id: str, election_id: str) -> dict:
         """Creates a transaction and adds it to pending votes"""
-        # Enterprise Validation: Prevent double voting securely on the blockchain level
-        if self.has_voter_already_voted(voter_id, election_id):
-            logger.warning(f"Double voting attempt blocked for Voter {voter_id} in Election {election_id}")
-            raise ValueError(f"Voter {voter_id} has already cast a vote in Election {election_id}")
+        with _chain_lock:
+            # Enterprise Validation: Prevent double voting securely on the blockchain level
+            if self.has_voter_already_voted(voter_id, election_id):
+                logger.warning(f"Double voting attempt blocked for Voter {voter_id} in Election {election_id}")
+                raise ValueError(f"Voter {voter_id} has already cast a vote in Election {election_id}")
 
-        tx = VoteTransaction.create(voter_id, candidate_id, election_id)
-        self.pending_votes.append(tx.to_dict())
-        logger.info(f"Transaction {tx.id} added to pending pool.")
-        return tx.to_dict()
+            tx = VoteTransaction.create(voter_id, candidate_id, election_id)
+            self.pending_votes.append(tx.to_dict())
+            logger.info(f"Transaction {tx.id} added to pending pool.")
+            return tx.to_dict()
 
     def has_voter_already_voted(self, voter_id: str, election_id: str) -> bool:
         """Scans the entire blockchain history to prevent double voting"""
@@ -104,16 +108,30 @@ class Blockchain:
     def last_block(self) -> Block:
         return self.chain[-1]
 
-    def proof_of_work(self, previous_proof: int) -> int:
+    def proof_of_work(self, previous_proof: int, max_iterations: int = 1_000_000) -> int:
         new_proof = 1
-        target = '0' * MINING_DIFFICULTY
-        while True:
+        check_proof = False
+        iterations = 0
+        while check_proof is False:
+            iterations += 1
+            if iterations > max_iterations:
+                raise RuntimeError(f'proof_of_work exceeded {max_iterations} iterations')
             hash_operation = hashlib.sha256(str(new_proof**2 - previous_proof**2).encode()).hexdigest()
-            if hash_operation.startswith(target):
-                return new_proof
-            new_proof += 1
+            if hash_operation[:4] == '0000':
+                check_proof = True
+            else:
+                new_proof += 1
+        return new_proof
 
     def is_chain_valid(self) -> bool:
+        # Reload from disk to validate persisted state, not just in-memory state
+        try:
+            stored_chain = BlockchainStorage.load_chain()
+            if stored_chain:
+                self.chain = stored_chain
+        except Exception as e:
+            logger.warning(f'[is_chain_valid] Could not reload chain from disk: {e}')
+
         if not self.chain:
             return False
             
@@ -139,17 +157,18 @@ class Blockchain:
 
     def mine_pending_votes(self) -> Optional[dict]:
         """Mines pending transactions instantly into an immutable block"""
-        if not self.pending_votes:
-            logger.info("No pending votes to mine.")
-            return None
+        with _chain_lock:
+            if not self.pending_votes:
+                logger.info("No pending votes to mine.")
+                return None
+                
+            last_block = self.last_block
+            proof = self.proof_of_work(last_block.proof)
+            previous_hash = last_block.hash()
             
-        last_block = self.last_block
-        proof = self.proof_of_work(last_block.proof)
-        previous_hash = last_block.hash()
-        
-        block = self.create_block(proof, previous_hash)
-        logger.info(f"Successfully mined Block {block.index} with {len(block.transactions)} transactions.")
-        return block.to_dict()
+            block = self.create_block(proof, previous_hash)
+            logger.info(f"Successfully mined Block {block.index} with {len(block.transactions)} transactions.")
+            return block.to_dict()
 
 # Global singleton
 voting_chain = Blockchain()
