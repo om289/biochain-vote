@@ -461,7 +461,7 @@ export const localBlockchain = {
 
   async getVotersByElection(electionId: string): Promise<string[]> {
     const blocks = await this.getVoteBlocksByElection(electionId);
-    return [...new Set(blocks.map(b => b.data.payload.voterHash))];
+    return Array.from(new Set(blocks.map(b => String(b.data.payload.voterHash))));
   },
 
   // ── Booth sub-chain — verification ───────────────────────────────────────────
