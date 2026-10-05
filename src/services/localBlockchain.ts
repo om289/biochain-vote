@@ -154,9 +154,12 @@ async function verifyMerkleProof(leafHash: string, proof: MerkleProofStep[], exp
 // ─── IndexedDB helpers for booth_chains store ─────────────────────────────────
 
 async function _openDB(): Promise<IDBDatabase> {
-  // Re-use the same DB opened by dbService (same name + version)
+  // Re-use the same DB opened by dbService — MUST match DB_VERSION in dbService.ts
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('biochain-vote');
+    const req = indexedDB.open('biochain-vote', 8);
+    req.onupgradeneeded = () => {
+      // upgrade handled by dbService; if we get here, just resolve — stores will exist
+    };
     req.onsuccess = e => resolve((e.target as IDBOpenDBRequest).result);
     req.onerror = () => reject(req.error);
   });
