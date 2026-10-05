@@ -160,8 +160,81 @@ export default function AuditPage() {
     URL.revokeObjectURL(url);
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = async () => {
+    if (!selectedElection || !analytics) return;
+    const { jsPDF } = await import('jspdf');
+    const autoTable = (await import('jspdf-autotable')).default;
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+
+    // Title block
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('OFFICIAL ELECTION CERTIFICATE', pageW / 2, 20, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Election Commission of India — BioChain Blockchain-Verified Results', pageW / 2, 28, { align: 'center' });
+
+    // Election info block
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Election Details', 14, 40);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Title: ${selectedElection.title}`, 14, 47);
+    doc.text(`Constituency: ${selectedElection.constituency}, ${selectedElection.state}`, 14, 53);
+    doc.text(`Type: ${selectedElection.type}  |  Status: ${selectedElection.status}`, 14, 59);
+    doc.text(
+      `Period: ${new Date(selectedElection.startDate).toLocaleDateString()} — ${new Date(selectedElection.endDate).toLocaleDateString()}`,
+      14, 65
+    );
+    doc.text(`Total Votes Cast: ${analytics.totalVotes}`, 14, 71);
+
+    // Merkle root
+    doc.setFont('helvetica', 'bold');
+    doc.text('Blockchain Integrity', 14, 82);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`Merkle Root (SHA-256): ${analytics.blockchain.merkleRoot || '0'.repeat(64)}`, 14, 88);
+    doc.text(
+      `Chain Valid: ${analytics.blockchain.masterValid ? 'YES — Untampered' : 'NO — INTEGRITY VIOLATION'}`,
+      14, 94
+    );
+    doc.text(
+      `Total Blocks: ${analytics.blockchain.masterBlocks}  |  Leaf Count: ${analytics.blockchain.leafCount}`,
+      14, 100
+    );
+
+    // Results table
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Candidate Results', 14, 112);
+    autoTable(doc, {
+      startY: 116,
+      head: [['Rank', 'Candidate', 'Party', 'Votes', 'Vote Share %']],
+      body: analytics.results.map((r: any, i: number) => [
+        String(i + 1),
+        r.candidateName,
+        r.partyName,
+        String(r.voteCount),
+        `${r.percentage}%`,
+      ]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [30, 30, 60] },
+    });
+
+    // Footer
+    const finalY = (doc as any).lastAutoTable?.finalY || 160;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    doc.text(
+      `Generated: ${new Date().toISOString()}  |  BioChain Offline Blockchain System  |  Cryptographically Verified`,
+      pageW / 2,
+      finalY + 12,
+      { align: 'center' }
+    );
+
+    doc.save(`election-certificate-${selectedElection.id.slice(0, 8)}.pdf`);
   };
 
   if (loading) {

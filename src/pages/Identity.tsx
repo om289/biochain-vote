@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Fingerprint, ShieldCheck, QrCode, CheckCircle2, AlertCircle, Copy, Key, Globe, Clock, Server, Link2, Database, Boxes } from 'lucide-react';
+import { Fingerprint, ShieldCheck, QrCode, CheckCircle2, AlertCircle, Copy, Key, Globe, Clock, Server, Link2, Database, Boxes, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +26,7 @@ export default function IdentityPage() {
   const [did, setDid] = useState('');
   const [chainInfo, setChainInfo] = useState<{ length: number; is_valid: boolean; booths: any[] } | null>(null);
   const [assignedBooth, setAssignedBooth] = useState<{ booth_id: string; booth_name: string; constituency: string; assigned: boolean } | null>(null);
+  const [boothQrDataUrl, setBoothQrDataUrl] = useState<string>('');
 
   useEffect(() => {
     // Generate DID for voter
@@ -56,6 +57,11 @@ export default function IdentityPage() {
             constituency: booth?.constituency || '',
             assigned: true,
           });
+          // Generate real QR code asynchronously
+          generateQRDataURL(
+            `biochain://voter/${currentVoter.id}/booth/${boothAssignment.booth_id}`,
+            160
+          ).then(setBoothQrDataUrl).catch(() => {});
         } else {
           setAssignedBooth({ booth_id: '', booth_name: '', constituency: '', assigned: false });
         }
@@ -340,11 +346,17 @@ export default function IdentityPage() {
             <CardContent className="text-center space-y-3">
               {assignedBooth?.assigned ? (
                 <>
-                  <img
-                    src={generateQRDataURL(`biochain://voter/${currentVoter.id}/booth/${assignedBooth.booth_id}`, 160)}
-                    alt="Booth Voting Pass QR"
-                    className="mx-auto rounded-lg border border-border bg-white p-2"
-                  />
+                  {boothQrDataUrl ? (
+                    <img
+                      src={boothQrDataUrl}
+                      alt="Booth Voting Pass QR"
+                      className="mx-auto rounded-lg border border-border bg-white p-2"
+                    />
+                  ) : (
+                    <div className="mx-auto w-40 h-40 flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                    </div>
+                  )}
                   <p className="text-sm font-medium text-foreground mt-2">{assignedBooth.booth_name}</p>
                   <p className="text-[10px] text-biochain-warning font-mono break-all uppercase">
                     Booth ID: {assignedBooth.booth_id}

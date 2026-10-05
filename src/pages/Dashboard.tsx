@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, Hash, Server } from 'lucide-react';
+import { Vote, ShieldCheck, BarChart3, Clock, CheckCircle2, AlertCircle, ArrowRight, Fingerprint, User, MapPin, Hash, Server, TrendingUp, Activity, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -168,6 +168,9 @@ const Dashboard = () => {
   const [chainValid, setChainValid] = useState(true);
   const [votedElections, setVotedElections] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
+  const [turnout, setTurnout] = useState<{ totalVoters: number; totalVotes: number; byElection: { title: string; votes: number; status: string }[] }>({
+    totalVoters: 0, totalVotes: 0, byElection: [],
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -195,6 +198,35 @@ const Dashboard = () => {
     };
     load();
   }, [setElections, currentVoter]);
+
+  const loadTurnout = useCallback(async () => {
+    try {
+      const allVoters = await apiService.getVoters();
+      const allElections = await apiService.getElections();
+      let totalVotes = 0;
+      const byElection: { title: string; votes: number; status: string }[] = [];
+      for (const e of allElections) {
+        const count = await apiService.getVoteCountByElection(e.id);
+        totalVotes += count;
+        byElection.push({ title: e.title, votes: count, status: e.status });
+      }
+      setTurnout({ totalVoters: allVoters.length, totalVotes, byElection });
+    } catch (e) {
+      console.warn('Turnout load failed:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTurnout();
+  }, [loadTurnout]);
+
+  // Auto-refresh turnout every 15 seconds when there is an active election
+  useEffect(() => {
+    const hasActiveElection = elections.some(e => e.status === 'active');
+    if (!hasActiveElection) return;
+    const id = setInterval(loadTurnout, 15_000);
+    return () => clearInterval(id);
+  }, [elections, loadTurnout]);
 
   // Filter elections relevant to the voter
   const relevantElections = currentVoter
@@ -270,6 +302,62 @@ const Dashboard = () => {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Live Turnout Widget */}
+      {turnout.totalVoters > 0 && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
+          <Card className="glass border-border/50 overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary via-biochain-cyber to-biochain-success" />
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <TrendingUp className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold">Live Turnout</span>
+                <div className="ml-auto flex items-center gap-1.5">
+                  <Activity className="w-3 h-3 text-biochain-success" />
+                  <span className="text-[10px] text-biochain-success">Live</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-foreground font-mono">{turnout.totalVotes}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Votes Cast</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-foreground font-mono">{turnout.totalVoters}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Registered</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-primary font-mono">
+                    {turnout.totalVoters > 0 ? Math.round((turnout.totalVotes / turnout.totalVoters) * 100) : 0}%
+                  </p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Turnout</p>
+                </div>
+              </div>
+              <Progress
+                value={turnout.totalVoters > 0 ? (turnout.totalVotes / turnout.totalVoters) * 100 : 0}
+                className="h-2 mb-3"
+              />
+              {turnout.byElection.length > 0 && (
+                <div className="space-y-1.5">
+                  {turnout.byElection.map(e => (
+                    <div key={e.title} className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground truncate max-w-[60%]">{e.title}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-foreground">{e.votes} votes</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                          e.status === 'active' ? 'bg-biochain-success/20 text-biochain-success' :
+                          e.status === 'upcoming' ? 'bg-biochain-warning/20 text-biochain-warning' :
+                          'bg-muted text-muted-foreground'
+                        }`}>{e.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
 
       {/* Elections */}
       <div className="space-y-4">

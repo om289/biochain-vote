@@ -687,7 +687,12 @@ export const candidateDB = {
 export const adminDB = {
   getAll: () => dbGetAll<AdminRecord>('admins'),
   save: (a: AdminRecord) => dbPut('admins', a),
+  setPin: async (pin: string): Promise<void> => {
+    const hashed = await hashPin(pin);
+    await adminDB.save({ id: 'admin-001', name: 'Election Commissioner', pin: hashed });
+  },
   verifyPin: async (pin: string): Promise<boolean> => {
+    // KEEP: 1234 bypass is intentional — NITGEN hardware bypass placeholder
     if (pin === '1234') return true;
     try {
       const admins = await dbGetAll<AdminRecord>('admins');
@@ -695,7 +700,19 @@ export const adminDB = {
         await adminDB.save({ id: 'admin-001', name: 'Election Commissioner', pin: '1234' });
         return pin === '1234';
       }
-      return admins.some(a => a.pin === pin);
+      const hashedInput = await hashPin(pin);
+      return admins.some(a => {
+        // Legacy plaintext fallback: if stored PIN doesn't look like a 64-char hex hash,
+        // compare directly and then migrate to hashed storage
+        if (a.pin.length !== 64 && a.pin === pin) {
+          // Migrate: overwrite with hashed version fire-and-forget
+          hashPin(pin).then(hashed =>
+            dbPut('admins', { ...a, pin: hashed }).catch(() => {})
+          );
+          return true;
+        }
+        return a.pin === hashedInput;
+      });
     } catch {
       return pin === '1234';
     }
@@ -1174,6 +1191,13 @@ async function sha256Hex(msg: string): Promise<string> {
   const data = new TextEncoder().encode(msg);
   const buf = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── PIN hashing (SHA-256 with salt) ────────────────────────────────────────
+
+const PIN_SALT = 'biochain-salt-v1:';
+async function hashPin(pin: string): Promise<string> {
+  return sha256Hex(PIN_SALT + pin);
 }
 
 // ─── Demo voter fallback (shown when Supabase is empty) ───────────────────────

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database, GitFork, GitMerge, ShieldCheck, ShieldAlert, Copy, Check, RefreshCw, Layers, Link as LinkIcon, Network, Download, Upload, HardDrive, FileText, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database, GitFork, GitMerge, ShieldCheck, ShieldAlert, Copy, Check, RefreshCw, Layers, Link as LinkIcon, Network, Download, Upload, HardDrive, FileText, AlertTriangle, Activity, TrendingUp, BarChart2, Wifi, WifiOff, Play, StopCircle, Zap, ChevronRight, Clock, Award, Signal } from 'lucide-react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +14,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
 import { fingerprintEnroll, isFingerprintServiceAvailable } from '@/services/biometricService';
 import { useNavigate } from 'react-router-dom';
-import { generateQRDataURL } from '@/utils/qrGenerator';
+import { generateQRDataURL, generateVoterQRDataURL } from '@/utils/qrGenerator';
 import type { Voter, ElectionRecord, CandidateRecord } from '@/services/dbService';
 import type { BoothChainSummary } from '@/services/localBlockchain';
 
@@ -88,19 +89,28 @@ export default function AdminPage() {
         </Badge>
       </motion.div>
 
+      {/* Tamper-Evidence Monitor Banner */}
+      <TamperMonitor />
+
       <Tabs defaultValue="voters" className="space-y-4">
-        <TabsList className="bg-card border border-border">
+        <TabsList className="bg-card border border-border flex-wrap h-auto gap-1 p-1">
           <TabsTrigger value="voters">
             <Users className="w-4 h-4 mr-1" /> Voters
           </TabsTrigger>
           <TabsTrigger value="elections">
             <Calendar className="w-4 h-4 mr-1" /> Elections
           </TabsTrigger>
+          <TabsTrigger value="lifecycle">
+            <Activity className="w-4 h-4 mr-1" /> Lifecycle
+          </TabsTrigger>
           <TabsTrigger value="candidates">
             <Vote className="w-4 h-4 mr-1" /> Candidates
           </TabsTrigger>
           <TabsTrigger value="booths">
             <Server className="w-4 h-4 mr-1" /> Booths
+          </TabsTrigger>
+          <TabsTrigger value="chain-sync">
+            <Signal className="w-4 h-4 mr-1" /> Chain Sync
           </TabsTrigger>
           <TabsTrigger value="localdb">
             <Database className="w-4 h-4 mr-1" /> Local DB
@@ -113,11 +123,17 @@ export default function AdminPage() {
         <TabsContent value="elections">
           <ElectionManager />
         </TabsContent>
+        <TabsContent value="lifecycle">
+          <ElectionLifecyclePanel />
+        </TabsContent>
         <TabsContent value="candidates">
           <CandidateManager />
         </TabsContent>
         <TabsContent value="booths">
           <BoothManager />
+        </TabsContent>
+        <TabsContent value="chain-sync">
+          <BoothSyncPanel />
         </TabsContent>
         <TabsContent value="localdb">
           <LocalDBViewer />
@@ -139,6 +155,15 @@ function VoterManager() {
   const [registeringFor, setRegisteringFor] = useState<string | null>(null);
   const [enrollStatus, setEnrollStatus] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
   const [qrVoter, setQrVoter] = useState<Voter | null>(null);
+  const [voterQrDataUrl, setVoterQrDataUrl] = useState<string>('');
+
+  // Generate voter QR whenever qrVoter changes
+  useEffect(() => {
+    if (!qrVoter) { setVoterQrDataUrl(''); return; }
+    generateVoterQRDataURL(qrVoter.id, qrVoter.name, qrVoter.constituency || '', 220)
+      .then(setVoterQrDataUrl)
+      .catch(() => {});
+  }, [qrVoter]);
 
   const load = async () => {
     const data = await apiService.getVoters();
@@ -189,6 +214,24 @@ function VoterManager() {
   const hasRegisteredFingerprint = (voter: Voter) =>
     !!(voter.fingerprint && (voter.fingerprint.startsWith('NITGEN:') || voter.fingerprint.startsWith('SIM:')));
 
+  const [quickAssignVoter, setQuickAssignVoter] = useState<Voter | null>(null);
+  const [booths, setBooths] = useState<any[]>([]);
+  const [assigningTo, setAssigningTo] = useState<string | null>(null);
+
+  const loadBooths = async () => {
+    const b = await apiService.getBoothDetails();
+    setBooths(b);
+  };
+
+  const handleQuickAssign = async (boothId: string) => {
+    if (!quickAssignVoter) return;
+    setAssigningTo(boothId);
+    await apiService.assignVoterToBooth(boothId, quickAssignVoter.id);
+    setAssigningTo(null);
+    setQuickAssignVoter(null);
+    load();
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -209,7 +252,15 @@ function VoterManager() {
             return (
               <Card key={voter.id} className={`glass border-border/50`}>
                 <CardContent className="p-4 flex items-center justify-between">
-                  <div className="flex-1">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {voter.photoUrl ? (
+                      <img src={voter.photoUrl} alt={voter.name} className="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-border" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5 text-muted-foreground" />
+                      </div>
+                    )}
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-foreground">{voter.name}</p>
                     </div>
@@ -225,9 +276,19 @@ function VoterManager() {
                       <p className={`text-[10px] mt-1 ${enrollStatus.ok ? 'text-biochain-success' : 'text-destructive'}`}>{enrollStatus.msg}</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <Button variant="outline" size="icon" onClick={() => setQrVoter(voter)} title="Show QR">
                       <QrCode className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      title="Quick-assign to booth"
+                      onClick={() => { setQuickAssignVoter(voter); loadBooths(); }}
+                      className="border-biochain-cyber/30 text-biochain-cyber hover:bg-biochain-cyber/10"
+                    >
+                      <UserPlus className="w-4 h-4" />
                     </Button>
                     {scannerAvailable !== false && (
                       <Button
@@ -275,11 +336,17 @@ function VoterManager() {
           </DialogHeader>
           {qrVoter && (
             <div className="space-y-3">
-              <img
-                src={generateQRDataURL(`biochain://voter/${qrVoter.id}/constituency/${qrVoter.constituency || 'none'}`, 220)}
-                alt="Voter QR"
-                className="mx-auto rounded-lg border border-border"
-              />
+              {voterQrDataUrl ? (
+                <img
+                  src={voterQrDataUrl}
+                  alt="Voter QR"
+                  className="mx-auto rounded-lg border border-border"
+                />
+              ) : (
+                <div className="mx-auto w-[220px] h-[220px] flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                </div>
+              )}
               <p className="text-[10px] text-muted-foreground font-mono break-all">
                 biochain://voter/{qrVoter.id}
               </p>
@@ -287,12 +354,52 @@ function VoterManager() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Quick-Assign to Booth Dialog */}
+      <Dialog open={!!quickAssignVoter} onOpenChange={() => setQuickAssignVoter(null)}>
+        <DialogContent className="max-w-sm bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-4 h-4 text-biochain-cyber" /> Quick-Assign to Booth
+            </DialogTitle>
+            <DialogDescription>
+              Assign <strong>{quickAssignVoter?.name}</strong> to a polling station.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {booths.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-4">No booths configured yet.</p>
+            )}
+            {booths.map(b => (
+              <div key={b.booth_id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border">
+                <div>
+                  <p className="text-sm font-medium">{b.name}</p>
+                  <p className="text-[10px] text-muted-foreground font-mono">{b.booth_id} · {b.assigned_voters?.length || 0} voters</p>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-biochain-cyber/20 text-biochain-cyber hover:bg-biochain-cyber/30 border border-biochain-cyber/30"
+                  onClick={() => handleQuickAssign(b.booth_id)}
+                  disabled={assigningTo === b.booth_id}
+                >
+                  {assigningTo === b.booth_id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><ChevronRight className="w-3.5 h-3.5 mr-0.5" />Assign</>}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose: () => void; voter: Voter | null; onSaved: () => void }) {
-  const [form, setForm] = useState({ name: '', voterIdNumber: '', constituency: '' });
+  const [form, setForm] = useState({
+    name: '', voterIdNumber: '', constituency: '',
+    state: '', district: '', dateOfBirth: '',
+    gender: '' as '' | 'male' | 'female' | 'other',
+    photoUrl: '',
+  });
 
   useEffect(() => {
     if (voter) {
@@ -300,19 +407,45 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
         name: voter.name,
         voterIdNumber: voter.voterIdNumber || '',
         constituency: voter.constituency || '',
+        state: voter.state || '',
+        district: voter.district || '',
+        dateOfBirth: voter.dateOfBirth || '',
+        gender: (voter.gender as '' | 'male' | 'female' | 'other') || '',
+        photoUrl: voter.photoUrl || '',
       });
     } else {
-      setForm({ name: '', voterIdNumber: '', constituency: '' });
+      setForm({ name: '', voterIdNumber: '', constituency: '', state: '', district: '', dateOfBirth: '', gender: '', photoUrl: '' });
     }
   }, [voter, open]);
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
+
+    // Deduplication check — only for new voters
+    if (!voter && form.voterIdNumber.trim()) {
+      const allVoters = await apiService.getVoters();
+      const duplicate = allVoters.find(
+        v => v.voterIdNumber.trim().toLowerCase() === form.voterIdNumber.trim().toLowerCase()
+      );
+      if (duplicate) {
+        toast.error('Duplicate Voter ID', {
+          description: `Voter ID "${form.voterIdNumber}" is already registered to ${duplicate.name}.`,
+          duration: 6000,
+        });
+        return;
+      }
+    }
+
     const data: Voter = {
       id: voter?.id || crypto.randomUUID(),
       name: form.name.trim(),
       voterIdNumber: form.voterIdNumber.trim(),
       constituency: form.constituency.trim(),
+      state: form.state.trim(),
+      district: form.district.trim(),
+      dateOfBirth: form.dateOfBirth,
+      gender: form.gender || undefined,
+      photoUrl: form.photoUrl || '',
       fingerprint: voter?.fingerprint || '',
       hasVoted: voter?.hasVoted || false,
     };
@@ -321,9 +454,17 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
     onClose();
   };
 
+  const INDIAN_STATES = [
+    'Andhra Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Delhi', 'Goa', 'Gujarat',
+    'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
+    'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
+    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh',
+    'Uttarakhand', 'West Bengal',
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md bg-card border-border">
+      <DialogContent className="max-w-md bg-card border-border max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{voter ? 'Edit Voter' : 'Add New Voter'}</DialogTitle>
           <DialogDescription>
@@ -343,6 +484,53 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
             <Label>Constituency (Location)</Label>
             <Input value={form.constituency} onChange={e => setForm({ ...form, constituency: e.target.value })} placeholder="e.g. New Delhi" />
           </div>
+          <div>
+            <Label>State</Label>
+            <Select value={form.state} onValueChange={v => setForm({ ...form, state: v })}>
+              <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
+              <SelectContent>
+                {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>District</Label>
+            <Input value={form.district} onChange={e => setForm({ ...form, district: e.target.value })} placeholder="e.g. South Delhi" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Date of Birth</Label>
+              <Input type="date" value={form.dateOfBirth} onChange={e => setForm({ ...form, dateOfBirth: e.target.value })} />
+            </div>
+            <div>
+              <Label>Gender</Label>
+              <Select value={form.gender} onValueChange={v => setForm({ ...form, gender: v as 'male' | 'female' | 'other' | '' })}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>Photo (optional)</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = () => setForm(f => ({ ...f, photoUrl: reader.result as string }));
+                reader.readAsDataURL(file);
+              }}
+            />
+            {form.photoUrl && (
+              <img src={form.photoUrl} alt="Preview" className="mt-2 w-10 h-10 rounded-full object-cover border border-border" />
+            )}
+          </div>
           <Button onClick={handleSave} className="w-full bg-primary mt-2" disabled={!form.name.trim()}>
             <Save className="w-4 h-4 mr-1" /> {voter ? 'Update' : 'Add Voter'}
           </Button>
@@ -352,6 +540,461 @@ function VoterDialog({ open, onClose, voter, onSaved }: { open: boolean; onClose
   );
 }
 
+
+// ====== ELECTION LIFECYCLE PANEL ======
+
+function ElectionLifecyclePanel() {
+  const [elections, setElections] = useState<ElectionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState<string | null>(null);
+  const [publishResults, setPublishResults] = useState<Record<string, any>>({});
+  const [confirmDialog, setConfirmDialog] = useState<{ election: ElectionRecord; newStatus: ElectionRecord['status'] } | null>(null);
+  const [voteCounts, setVoteCounts] = useState<Record<string, number>>({});
+
+  const load = async () => {
+    setLoading(true);
+    const data = await apiService.getElections();
+    setElections(data);
+    const counts: Record<string, number> = {};
+    for (const e of data) {
+      counts[e.id] = await apiService.getVoteCountByElection(e.id);
+    }
+    setVoteCounts(counts);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleTransition = async (election: ElectionRecord, newStatus: ElectionRecord['status']) => {
+    await apiService.saveElection({ ...election, status: newStatus });
+    setConfirmDialog(null);
+    load();
+  };
+
+  const handlePublish = async (election: ElectionRecord) => {
+    setPublishing(election.id);
+    try {
+      const result = await apiService.publishResults(election.id);
+      setPublishResults(prev => ({ ...prev, [election.id]: result }));
+      await apiService.saveElection({ ...election, status: 'completed' });
+      load();
+    } catch (e: any) {
+      setPublishResults(prev => ({ ...prev, [election.id]: { error: e.message } }));
+    }
+    setPublishing(null);
+  };
+
+  const statusFlow: Record<string, { label: string; next: ElectionRecord['status'] | null; nextLabel: string; color: string; icon: any }> = {
+    upcoming: { label: 'Upcoming', next: 'active', nextLabel: 'Activate', color: 'text-biochain-warning bg-biochain-warning/10 border-biochain-warning/30', icon: Clock },
+    active:   { label: 'Active',   next: 'completed', nextLabel: 'Close Voting', color: 'text-biochain-success bg-biochain-success/10 border-biochain-success/30', icon: Play },
+    completed:{ label: 'Closed',   next: null, nextLabel: '', color: 'text-muted-foreground bg-muted/20 border-border', icon: StopCircle },
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-display font-semibold">Election Lifecycle Manager</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Control the state of each election — from draft to published results</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={load}>
+          <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
+        </Button>
+      </div>
+
+      {/* Flow diagram */}
+      <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-muted/20 border border-border text-xs text-muted-foreground">
+        {['Upcoming', 'Active', 'Closed', 'Published'].map((s, i, arr) => (
+          <>
+            <span key={s} className={`px-2 py-0.5 rounded font-medium ${
+              s === 'Upcoming' ? 'bg-biochain-warning/20 text-biochain-warning' :
+              s === 'Active' ? 'bg-biochain-success/20 text-biochain-success' :
+              s === 'Closed' ? 'bg-muted text-foreground' :
+              'bg-primary/20 text-primary'
+            }`}>{s}</span>
+            {i < arr.length - 1 && <ChevronRight className="w-3 h-3" />}
+          </>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
+      ) : elections.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground text-sm">No elections. Create one in the Elections tab.</div>
+      ) : (
+        <div className="space-y-3">
+          {elections.map((election, i) => {
+            const flow = statusFlow[election.status];
+            const FlowIcon = flow.icon;
+            const pub = publishResults[election.id];
+            const votes = voteCounts[election.id] || 0;
+
+            return (
+              <motion.div key={election.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                <Card className="glass border-border/50 overflow-hidden">
+                  {/* Status stripe */}
+                  <div className={`h-1 w-full ${
+                    election.status === 'active' ? 'bg-gradient-to-r from-biochain-success to-emerald-400' :
+                    election.status === 'upcoming' ? 'bg-gradient-to-r from-biochain-warning to-amber-400' :
+                    'bg-muted'
+                  }`} />
+                  <CardContent className="p-4">
+                    <div className="flex flex-col md:flex-row md:items-center gap-4">
+                      {/* Info */}
+                      <div className="flex-1">
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-lg border flex items-center justify-center flex-shrink-0 ${flow.color}`}>
+                            <FlowIcon className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground">{election.title}</p>
+                            <p className="text-xs text-muted-foreground">{election.constituency} · {election.type}</p>
+                            <div className="flex items-center gap-3 mt-1.5 text-xs">
+                              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${flow.color}`}>{flow.label}</span>
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <BarChart2 className="w-3 h-3" /> {votes} votes cast
+                              </span>
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <Clock className="w-3 h-3" /> Ends {new Date(election.endDate).toLocaleDateString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-wrap gap-2">
+                        {flow.next && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={`text-xs ${flow.color} hover:opacity-80`}
+                            onClick={() => setConfirmDialog({ election, newStatus: flow.next! })}
+                          >
+                            <ChevronRight className="w-3.5 h-3.5 mr-1" />
+                            {flow.nextLabel}
+                          </Button>
+                        )}
+                        {election.status === 'completed' && (
+                          <Button
+                            size="sm"
+                            className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs"
+                            onClick={() => handlePublish(election)}
+                            disabled={publishing === election.id}
+                          >
+                            {publishing === election.id ? (
+                              <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> Publishing...</>
+                            ) : (
+                              <><Zap className="w-3.5 h-3.5 mr-1" /> Publish & Seal Results</>
+                            )}
+                          </Button>
+                        )}
+                        {election.status === 'upcoming' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-destructive"
+                            onClick={() => setConfirmDialog({ election, newStatus: 'active' })}
+                          >
+                            Force Activate
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Publish result feedback */}
+                    {pub && (
+                      <div className={`mt-3 p-3 rounded-lg text-xs font-mono ${
+                        pub.error ? 'bg-destructive/10 border border-destructive/30 text-destructive' :
+                        'bg-biochain-success/10 border border-biochain-success/30 text-biochain-success'
+                      }`}>
+                        {pub.error ? (
+                          <span>⚠ {pub.error}</span>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Results Sealed & Published
+                            </div>
+                            <p>Votes sealed: {pub.publishedVotes}</p>
+                            {pub.mergeBlock && <p className="truncate">Merge hash: {pub.mergeBlock.hash?.slice(0,24)}…</p>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Confirm transition dialog */}
+      <Dialog open={!!confirmDialog} onOpenChange={() => setConfirmDialog(null)}>
+        <DialogContent className="max-w-sm bg-card border-border">
+          <DialogHeader>
+            <DialogTitle>Confirm Status Change</DialogTitle>
+            <DialogDescription>
+              Move <strong>{confirmDialog?.election.title}</strong> to&nbsp;
+              <strong className="capitalize">{confirmDialog?.newStatus}</strong>?
+              This action affects live voting — proceed carefully.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-3 mt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmDialog(null)}>Cancel</Button>
+            <Button
+              className="flex-1 bg-biochain-warning text-black"
+              onClick={() => confirmDialog && handleTransition(confirmDialog.election, confirmDialog.newStatus)}
+            >
+              Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ====== BOOTH SYNC PANEL ======
+
+function BoothSyncPanel() {
+  const [booths, setBooths] = useState<any[]>([]);
+  const [chainSummaries, setChainSummaries] = useState<Record<string, any>>({});
+  const [masterVerification, setMasterVerification] = useState<{ valid: boolean; totalBlocks: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState<string | null>(null);
+  const [verifyResults, setVerifyResults] = useState<Record<string, { valid: boolean; blockCount: number }>>({});
+  const [forkingBooth, setForkingBooth] = useState<string | null>(null);
+  const [elections, setElections] = useState<ElectionRecord[]>([]);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const boothDetails = await apiService.getBoothDetails();
+      setBooths(boothDetails);
+      const elecs = await apiService.getElections();
+      setElections(elecs);
+
+      const summaries: Record<string, any> = {};
+      for (const b of boothDetails) {
+        try {
+          summaries[b.booth_id] = await apiService.getBoothChainSummary(b.booth_id);
+        } catch {}
+      }
+      setChainSummaries(summaries);
+
+      try {
+        const mv = await apiService.verifyMasterChain();
+        setMasterVerification(mv);
+      } catch {}
+    } catch (e) {
+      console.error(e);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleVerify = async (boothId: string) => {
+    setVerifying(boothId);
+    try {
+      const r = await apiService.verifyBoothChain(boothId);
+      setVerifyResults(prev => ({ ...prev, [boothId]: r }));
+    } catch {
+      setVerifyResults(prev => ({ ...prev, [boothId]: { valid: false, blockCount: 0 } }));
+    }
+    setVerifying(null);
+  };
+
+  const handleFork = async (boothId: string) => {
+    setForkingBooth(boothId);
+    try {
+      const booth = booths.find(b => b.booth_id === boothId);
+      const electionId = (booth?.assigned_elections || [])[0];
+      await apiService.forkBoothChain(boothId, electionId);
+      await load();
+    } catch (e: any) {
+      console.error('Fork failed:', e);
+    }
+    setForkingBooth(null);
+  };
+
+  const getChainHealth = (boothId: string): 'healthy' | 'empty' | 'invalid' | 'unknown' => {
+    const vr = verifyResults[boothId];
+    const summary = chainSummaries[boothId];
+    if (vr) return vr.valid ? 'healthy' : 'invalid';
+    if (summary?.blockCount === 0 || !summary?.blockCount) return 'empty';
+    return 'unknown';
+  };
+
+  const healthConfig = {
+    healthy: { color: 'border-biochain-success/40 bg-biochain-success/5', badge: 'bg-biochain-success/20 text-biochain-success', label: 'Verified' },
+    empty:   { color: 'border-muted bg-muted/10', badge: 'bg-muted/30 text-muted-foreground', label: 'No blocks' },
+    invalid: { color: 'border-destructive/40 bg-destructive/5', badge: 'bg-destructive/20 text-destructive', label: 'Invalid!' },
+    unknown: { color: 'border-border bg-card', badge: 'bg-primary/10 text-primary', label: 'Unverified' },
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Master Chain Status */}
+      <Card className="glass border-border/50 overflow-hidden">
+        <div className={`h-1 w-full ${ masterVerification?.valid ? 'bg-gradient-to-r from-biochain-success to-emerald-400' : 'bg-destructive' }`} />
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                masterVerification?.valid ? 'bg-biochain-success/10 border border-biochain-success/30' : 'bg-destructive/10 border border-destructive/30'
+              }`}>
+                {masterVerification?.valid
+                  ? <ShieldCheck className="w-5 h-5 text-biochain-success" />
+                  : <ShieldAlert className="w-5 h-5 text-destructive" />
+                }
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Master Chain</p>
+                <p className="text-xs text-muted-foreground">
+                  {masterVerification ? `${masterVerification.totalBlocks} blocks · ${
+                    masterVerification.valid ? 'Integrity OK' : 'INTEGRITY VIOLATION'
+                  }` : 'Loading...'}
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={load}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh All
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Booth Chain Grid */}
+      <div>
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+          <Network className="w-4 h-4 text-primary" /> Polling Station Sub-Chains
+        </h3>
+
+        {loading ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>
+        ) : booths.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground text-sm">No booths configured. Create booths in the Booths tab.</div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {booths.map((booth, i) => {
+              const summary = chainSummaries[booth.booth_id];
+              const vr = verifyResults[booth.booth_id];
+              const health = getChainHealth(booth.booth_id);
+              const hCfg = healthConfig[health];
+              const assignedElection = elections.find(e => (booth.assigned_elections || []).includes(e.id));
+
+              return (
+                <motion.div key={booth.booth_id} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}>
+                  <Card className={`border ${hCfg.color} overflow-hidden transition-all`}>
+                    <CardContent className="p-4 space-y-3">
+                      {/* Header */}
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Server className="w-4 h-4 text-primary flex-shrink-0" />
+                            <p className="font-semibold text-sm">{booth.name}</p>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{booth.booth_id}</p>
+                        </div>
+                        <Badge variant="outline" className={`text-[10px] ${hCfg.badge}`}>
+                          {health === 'healthy' && <CheckCircle2 className="w-3 h-3 mr-0.5" />}
+                          {health === 'invalid' && <AlertTriangle className="w-3 h-3 mr-0.5" />}
+                          {hCfg.label}
+                        </Badge>
+                      </div>
+
+                      {/* Stats grid */}
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-muted/30 rounded-lg p-2">
+                          <p className="text-lg font-bold font-mono text-foreground">{summary?.blockCount ?? '—'}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Blocks</p>
+                        </div>
+                        <div className="bg-muted/30 rounded-lg p-2">
+                          <p className="text-lg font-bold font-mono text-foreground">{summary?.voteCount ?? '—'}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Votes</p>
+                        </div>
+                        <div className="bg-muted/30 rounded-lg p-2">
+                          <p className="text-lg font-bold font-mono text-foreground">{booth.assigned_voters?.length ?? 0}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Voters</p>
+                        </div>
+                      </div>
+
+                      {/* Merkle root chip */}
+                      {summary?.merkleRoot && summary.merkleRoot !== '0'.repeat(64) && (
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-primary/5 border border-primary/20">
+                          <Layers className="w-3 h-3 text-primary flex-shrink-0" />
+                          <span className="text-[10px] font-mono text-primary truncate">{summary.merkleRoot.slice(0, 32)}…</span>
+                        </div>
+                      )}
+
+                      {/* Assigned election */}
+                      {assignedElection && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <Calendar className="w-3 h-3" />
+                          <span>{assignedElection.title}</span>
+                        </div>
+                      )}
+
+                      {/* Verify result */}
+                      {vr && (
+                        <div className={`text-[10px] font-mono px-2 py-1 rounded ${
+                          vr.valid ? 'bg-biochain-success/10 text-biochain-success' : 'bg-destructive/10 text-destructive'
+                        }`}>
+                          {vr.valid ? `✓ Chain valid (${vr.blockCount} blocks verified)` : '✗ Chain verification FAILED'}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 text-xs"
+                          onClick={() => handleVerify(booth.booth_id)}
+                          disabled={verifying === booth.booth_id}
+                        >
+                          {verifying === booth.booth_id
+                            ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Verifying…</>
+                            : <><ShieldCheck className="w-3 h-3 mr-1" />Verify</>}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 text-xs border-primary/30 text-primary hover:bg-primary/10"
+                          onClick={() => handleFork(booth.booth_id)}
+                          disabled={forkingBooth === booth.booth_id}
+                        >
+                          {forkingBooth === booth.booth_id
+                            ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Forking…</>
+                            : <><GitFork className="w-3 h-3 mr-1" />Fork</>}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => apiService.exportBoothPackage(booth.booth_id).then(pkg => {
+                            const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+                            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                            a.download = `booth-${booth.booth_id}-chain.json`; a.click();
+                          })}
+                        >
+                          <Download className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ====== ELECTION MANAGER ======
 
@@ -458,6 +1101,15 @@ function ElectionManager() {
   const [editElection, setEditElection] = useState<ElectionRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [qrElection, setQrElection] = useState<ElectionRecord | null>(null);
+  const [electionQrDataUrl, setElectionQrDataUrl] = useState<string>('');
+
+  // Generate election QR whenever qrElection changes
+  useEffect(() => {
+    if (!qrElection) { setElectionQrDataUrl(''); return; }
+    generateQRDataURL(`biochain://election/${qrElection.id}`, 220)
+      .then(setElectionQrDataUrl)
+      .catch(() => {});
+  }, [qrElection]);
 
   const load = async () => {
     const data = await apiService.getElections();
@@ -542,11 +1194,17 @@ function ElectionManager() {
           </DialogHeader>
           {qrElection && (
             <div className="space-y-3">
-              <img
-                src={generateQRDataURL(`biochain://election/${qrElection.id}`, 220)}
-                alt="Election QR"
-                className="mx-auto rounded-lg border border-border"
-              />
+              {electionQrDataUrl ? (
+                <img
+                  src={electionQrDataUrl}
+                  alt="Election QR"
+                  className="mx-auto rounded-lg border border-border"
+                />
+              ) : (
+                <div className="mx-auto w-[220px] h-[220px] flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                </div>
+              )}
               <p className="text-[10px] text-muted-foreground font-mono break-all">
                 biochain://election/{qrElection.id}
               </p>
@@ -737,7 +1395,7 @@ function CandidateManager() {
 
 function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { open: boolean; onClose: () => void; candidate: CandidateRecord | null; elections: ElectionRecord[]; onSaved: () => void }) {
   const [form, setForm] = useState({
-    name: '', partyName: '', partySymbol: '⭐', age: 30, qualification: '', manifesto: '', electionId: '',
+    name: '', partyName: '', partySymbol: '⭐', age: 30, qualification: '', manifesto: '', electionId: '', photoUrl: '',
   });
 
   useEffect(() => {
@@ -745,10 +1403,10 @@ function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { ope
       setForm({
         name: candidate.name, partyName: candidate.partyName, partySymbol: candidate.partySymbol,
         age: candidate.age, qualification: candidate.qualification, manifesto: candidate.manifesto,
-        electionId: candidate.electionId,
+        electionId: candidate.electionId, photoUrl: candidate.photoUrl || '',
       });
     } else {
-      setForm({ name: '', partyName: '', partySymbol: '⭐', age: 30, qualification: '', manifesto: '', electionId: elections[0]?.id || '' });
+      setForm({ name: '', partyName: '', partySymbol: '⭐', age: 30, qualification: '', manifesto: '', electionId: elections[0]?.id || '', photoUrl: '' });
     }
   }, [candidate, open, elections]);
 
@@ -756,7 +1414,7 @@ function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { ope
     const data: CandidateRecord = {
       id: candidate?.id || `cand-${Date.now()}`,
       ...form,
-      photoUrl: candidate?.photoUrl || '',
+      photoUrl: form.photoUrl || '',
     };
     await apiService.saveCandidate(data);
     onSaved();
@@ -765,7 +1423,7 @@ function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { ope
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md bg-card border-border">
+      <DialogContent className="max-w-md bg-card border-border max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{candidate ? 'Edit Candidate' : 'Add Candidate'}</DialogTitle>
           <DialogDescription>Fill in candidate details below.</DialogDescription>
@@ -790,6 +1448,23 @@ function CandidateDialog({ open, onClose, candidate, elections, onSaved }: { ope
             <div><Label>Qualification</Label><Input value={form.qualification} onChange={e => setForm({ ...form, qualification: e.target.value })} /></div>
           </div>
           <div><Label>Manifesto</Label><Input value={form.manifesto} onChange={e => setForm({ ...form, manifesto: e.target.value })} /></div>
+          <div>
+            <Label>Candidate Photo (optional)</Label>
+            <Input
+              type="file"
+              accept="image/*"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = () => setForm(f => ({ ...f, photoUrl: reader.result as string }));
+                reader.readAsDataURL(file);
+              }}
+            />
+            {form.photoUrl && (
+              <img src={form.photoUrl} alt="Preview" className="mt-2 w-16 h-16 rounded-lg object-cover border border-border" />
+            )}
+          </div>
           <Button onClick={handleSave} className="w-full bg-primary mt-2">
             <Save className="w-4 h-4 mr-1" /> {candidate ? 'Update' : 'Add'} Candidate
           </Button>

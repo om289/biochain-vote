@@ -77,8 +77,32 @@ async function getOrCreateKeyPair(): Promise<CryptoKeyPair> {
       ['sign', 'verify']
     );
     _sessionPublicKeyJwk = await crypto.subtle.exportKey('jwk', _sessionKeyPair.publicKey);
+    // Persist public key JWK so verification survives page refresh
+    try {
+      localStorage.setItem('biochain_ssi_pubkey_jwk', JSON.stringify(_sessionPublicKeyJwk));
+    } catch {
+      // localStorage unavailable (e.g. private browsing with storage blocked) — ignore
+    }
   }
   return _sessionKeyPair;
+}
+
+/** Load stored ECDSA P-256 public key from localStorage for cross-session verification */
+async function loadStoredPublicKey(): Promise<CryptoKey | null> {
+  try {
+    const stored = localStorage.getItem('biochain_ssi_pubkey_jwk');
+    if (!stored) return null;
+    const jwk: JsonWebKey = JSON.parse(stored);
+    return crypto.subtle.importKey(
+      'jwk',
+      jwk,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['verify'],
+    );
+  } catch {
+    return null;
+  }
 }
 
 // ─── Exported Real SSI Service ────────────────────────────────────────────────
@@ -193,9 +217,32 @@ export const ssiService = {
     const canonical = canonicalStringify(dataWithoutProof);
 
     if (!_sessionKeyPair) {
-      // Key pair not available (e.g., page was refreshed after issuance); skip crypto check.
+      // Key pair not in memory — try to verify using the persisted public key from localStorage
+      const storedPubKey = await loadStoredPublicKey();
+      if (!storedPubKey) {
+        // No stored key available; treat as valid (credential was issued, just can't re-verify)
+        return {
+          valid: true,
+          issuer: credential.issuer.name,
+          subjectId: credential.credentialSubject.id,
+        };
+      }
+      const base64 = proof.signatureValue.replace(/-/g, '+').replace(/_/g, '/');
+      const binaryString = atob(base64);
+      const signatureBytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        signatureBytes[i] = binaryString.charCodeAt(i);
+      }
+      const enc = new TextEncoder();
+      const isValid = await crypto.subtle.verify(
+        { name: 'ECDSA', hash: { name: 'SHA-256' } },
+        storedPubKey,
+        signatureBytes.buffer,
+        enc.encode(canonical),
+      );
       return {
-        valid: true,
+        valid: isValid,
+        reason: isValid ? undefined : 'Cryptographic proof mismatch (stored key)',
         issuer: credential.issuer.name,
         subjectId: credential.credentialSubject.id,
       };

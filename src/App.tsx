@@ -16,6 +16,7 @@ import Audit from "./pages/Audit";
 import Identity from "./pages/Identity";
 import Explorer from "./pages/Explorer";
 import NotFound from "./pages/NotFound";
+import ActivityLog from "./pages/ActivityLog";
 
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ const App = () => (
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
           <Route path="/audit" element={<ProtectedRoute><Audit /></ProtectedRoute>} />
+          <Route path="/activity-log" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
           <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
           <Route path="/explorer" element={<ProtectedRoute><Explorer /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />

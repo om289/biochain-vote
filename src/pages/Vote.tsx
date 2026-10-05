@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound, Server, Lock, ShieldAlert } from 'lucide-react';
+import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound, Server, Lock, ShieldAlert, Printer } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
+import { blockchainService } from '@/services/blockchainService';
+import { activityLogDB } from '@/services/dbService';
 import type { ElectionRecord, CandidateRecord } from '@/services/dbService';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { toast } from 'sonner';
 
 type Step = 'select-election' | 'select-candidate' | 'confirm' | 'verify-fingerprint' | 'success';
 
@@ -78,6 +81,23 @@ export default function VotePage() {
     setScanning(true);
     setError('');
 
+    // ZK commitment — fire-and-forget, never blocks the vote
+    try {
+      const commitment = await blockchainService.createVoteCommitment(
+        selectedCandidate.id,
+        currentVoter.id,
+        selectedElection.id,
+      );
+      // Optional: push to local ZK service if available
+      fetch('http://localhost:5000/api/zk-commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commitment: commitment.commitment, electionId: selectedElection.id }),
+      }).catch(() => {}); // completely fire-and-forget
+    } catch {
+      // Commitment failure never blocks the vote
+    }
+
     try {
       const vote = await apiService.castVote(
         selectedElection.id,
@@ -101,9 +121,29 @@ export default function VotePage() {
         status: 'confirmed',
       });
 
+      // Activity log + toast
+      await activityLogDB.log({
+        category: 'vote',
+        action: 'Vote cast',
+        actor: currentVoter.id,
+        detail: `Election: ${selectedElection.title} | Candidate: ${selectedCandidate.name} | Block #${vote.blockIndex}`,
+        severity: 'success',
+      });
+      toast.success('Vote sealed on blockchain', {
+        description: `Block #${vote.blockIndex} · ${vote.blockHash.slice(0, 16)}…`,
+        duration: 6000,
+      });
+
       setStep('success');
     } catch (e: any) {
       setError(e.message || 'Vote casting failed');
+      await activityLogDB.log({
+        category: 'vote',
+        action: 'Vote failed',
+        actor: currentVoter?.id || 'unknown',
+        detail: e.message || 'Unknown error',
+        severity: 'error',
+      }).catch(() => {});
     } finally {
       setScanning(false);
     }
@@ -310,8 +350,12 @@ export default function VotePage() {
                 >
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
-                      <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-2xl flex-shrink-0">
-                        {candidate.partySymbol}
+                      <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-2xl flex-shrink-0 overflow-hidden">
+                        {candidate.photoUrl ? (
+                          <img src={candidate.photoUrl} alt={candidate.name} className="w-14 h-14 object-cover" />
+                        ) : (
+                          <span className="text-2xl">{candidate.partySymbol}</span>
+                        )}
                       </div>
                       <div className="flex-1">
                         <p className="font-medium text-foreground group-hover:text-primary transition-colors">{candidate.name}</p>

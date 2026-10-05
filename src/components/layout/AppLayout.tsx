@@ -1,5 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint, Network, LogOut, Clock, Settings, FileCheck, Layers } from 'lucide-react';
+import { Home, Vote, ShieldCheck, User, BarChart3, Users, Fingerprint, Network, LogOut, Clock, Settings, FileCheck, Layers, ScrollText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAppStore } from '@/store/useAppStore';
@@ -21,6 +21,7 @@ const navItems = [
 const adminItems = [
   { to: '/admin', label: 'Admin', icon: Users },
   { to: '/audit', label: 'Audit', icon: BarChart3 },
+  { to: '/activity-log', label: 'Activity Log', icon: ScrollText },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
