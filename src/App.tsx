@@ -17,6 +17,7 @@ import Identity from "./pages/Identity";
 import Explorer from "./pages/Explorer";
 import NotFound from "./pages/NotFound";
 import ActivityLog from "./pages/ActivityLog";
+import BoothInfo from "./pages/BoothInfo";
 
 const queryClient = new QueryClient();
 
@@ -49,8 +50,9 @@ const App = () => (
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/vote" element={<ProtectedRoute><Vote /></ProtectedRoute>} />
           <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
+          <Route path="/booth" element={<BoothInfo />} />
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+          <Route path="/admin" element={<AppLayout><Admin /></AppLayout>} />
           <Route path="/audit" element={<ProtectedRoute><Audit /></ProtectedRoute>} />
           <Route path="/activity-log" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
           <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />

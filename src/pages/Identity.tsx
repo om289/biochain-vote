@@ -34,8 +34,10 @@ export default function IdentityPage() {
     if (currentVoter) {
       generateDID(currentVoter.id).then(did => {
         setDid(did);
-        // Generate real identity QR once DID is ready
-        generateQRDataURL(`biochain://verify/${did}`, 160)
+        // Identity QR encodes the /booth URL with DID (SHA-256 hash) + voter params
+        // so scanning it redirects to the booth verification page
+        const identityUrl = `${window.location.origin}/booth?did=${encodeURIComponent(did)}&voter=${encodeURIComponent(currentVoter.id)}`;
+        generateQRDataURL(identityUrl, 160)
           .then(setIdentityQrDataUrl)
           .catch(() => {});
       });
@@ -65,7 +67,7 @@ export default function IdentityPage() {
             assigned: true,
           });
           // Generate real QR code asynchronously
-          const boothQrPayload = `${window.location.origin}/verify?voter=${encodeURIComponent(currentVoter.id)}&booth=${encodeURIComponent(boothAssignment.booth_id)}`;
+          const boothQrPayload = `${window.location.origin}/booth?voter=${encodeURIComponent(currentVoter.id)}&booth=${encodeURIComponent(boothAssignment.booth_id)}`;
           generateQRDataURL(boothQrPayload, 160).then(setBoothQrDataUrl).catch(() => {});
         } else {
           setAssignedBooth({ booth_id: '', booth_name: '', constituency: '', assigned: false });
@@ -202,7 +204,7 @@ export default function IdentityPage() {
 
   // ── Voter Identity View ──
   const appBaseUrl = window.location.origin;
-  const qrData = `${appBaseUrl}/verify?did=${encodeURIComponent(did)}&voter=${encodeURIComponent(currentVoter.id)}`;
+  const qrData = `${appBaseUrl}/booth?did=${encodeURIComponent(did)}&voter=${encodeURIComponent(currentVoter.id)}`;
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">

@@ -157,7 +157,7 @@ export interface ActivityLogRecord {
 // ─── IndexedDB (local) ────────────────────────────────────────────────────────
 
 const DB_NAME = 'biochain-vote';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let _db: IDBDatabase | null = null;
 
@@ -214,6 +214,10 @@ function openDB(): Promise<IDBDatabase> {
         al.createIndex('timestamp', 'timestamp', { unique: false });
         al.createIndex('category', 'category', { unique: false });
         al.createIndex('actor', 'actor', { unique: false });
+      }
+      // v8: local voter store — offline-first fallback for demo voters
+      if (!db.objectStoreNames.contains('voters')) {
+        db.createObjectStore('voters', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => { _db = (e.target as IDBOpenDBRequest).result; resolve(_db); };
@@ -300,10 +304,12 @@ let _cachedVoters: Voter[] | null = null;
 export const voterDB = {
   async getAll(): Promise<Voter[]> {
     if (_cachedVoters) {
-      // Fire and forget to refresh cache
+      // Fire and forget background refresh from Supabase
       supabase.from('voters').select('*').then(({ data, error }) => {
         if (!error && data && data.length > 0) {
           _cachedVoters = data.map(rowToVoter);
+          // Sync into IndexedDB for offline use
+          _cachedVoters.forEach(v => dbPut('voters', v).catch(() => {}));
         }
       });
       return _cachedVoters;
@@ -311,34 +317,47 @@ export const voterDB = {
 
     try {
       const { data, error } = await supabase.from('voters').select('*');
-      if (error || !data || data.length === 0) {
-        _cachedVoters = getDemoVoters();
+      if (!error && data && data.length > 0) {
+        _cachedVoters = data.map(rowToVoter);
+        // Mirror to IndexedDB for offline access
+        _cachedVoters.forEach(v => dbPut('voters', v).catch(() => {}));
         return _cachedVoters;
       }
-      _cachedVoters = data.map(rowToVoter);
-      return _cachedVoters;
     } catch {
-      _cachedVoters = getDemoVoters();
-      return _cachedVoters;
+      // Supabase unavailable — fall through to IndexedDB
     }
+
+    // Fallback: load from IndexedDB (covers offline mode and demo voters seeded locally)
+    const local = await dbGetAll<Voter>('voters');
+    _cachedVoters = local;
+    return _cachedVoters;
   },
 
   async getById(id: string): Promise<Voter | undefined> {
+    // Check cache first
+    if (_cachedVoters) {
+      const hit = _cachedVoters.find(v => v.id === id);
+      if (hit) return hit;
+    }
     try {
       const { data } = await supabase.from('voters').select('*').eq('id', id).single();
-      return data ? rowToVoter(data) : undefined;
+      if (data) return rowToVoter(data);
     } catch {
-      const demos = getDemoVoters();
-      return demos.find(v => v.id === id);
+      // fall through
     }
+    // Fallback to IndexedDB
+    return dbGet<Voter>('voters', id);
   },
 
   async save(voter: Voter): Promise<void> {
+    // Always write to IndexedDB immediately (offline-first)
+    await dbPut('voters', voter);
     if (_cachedVoters) {
       const idx = _cachedVoters.findIndex(v => v.id === voter.id);
       if (idx >= 0) _cachedVoters[idx] = voter;
       else _cachedVoters.push(voter);
     }
+    // Try Supabase; if it fails, queue for later sync
     const { error } = await supabase.from('voters').upsert({
       id: voter.id,
       name: voter.name,
@@ -347,20 +366,18 @@ export const voterDB = {
       fingerprint_template: voter.fingerprint || null,
     });
     if (error) {
-      console.error('[dbService] Error saving voter:', error);
-      throw error;
+      console.warn('[dbService] Voter saved to IndexedDB but Supabase upsert failed (will sync later):', error.message);
+      offlineSyncQueue.enqueue({ type: 'voters/save', payload: { voter } }).catch(() => {});
     }
-    // Invalidate cache so next getAll() fetches fresh data from Supabase
-    _cachedVoters = null;
   },
 
   async delete(id: string): Promise<void> {
     if (_cachedVoters) _cachedVoters = _cachedVoters.filter(v => v.id !== id);
-    const { error } = await supabase.from('voters').delete().eq('id', id);
-    if (!error) {
-      // Invalidate cache so next getAll() reflects the deletion
-      _cachedVoters = null;
-    }
+    // Remove from IndexedDB immediately
+    await dbDelete('voters', id);
+    // Also remove from Supabase
+    await supabase.from('voters').delete().eq('id', id);
+    _cachedVoters = null;
   },
 
   async count(): Promise<number> {
@@ -1224,6 +1241,11 @@ export async function seedDemoData(): Promise<void> {
   if (n > 0) return;
 
   await adminDB.save({ id: 'admin-001', name: 'Election Commissioner', pin: '1234' });
+
+  // ── Demo Voters (seeded into IndexedDB — app works fully offline) ──
+  // DID is SHA-256(voterId) generated at runtime — these IDs are stable so DIDs are stable
+  const demoVoters = getDemoVoters();
+  for (const v of demoVoters) await voterDB.save(v);
 
   // ── Elections ──
   const elections: ElectionRecord[] = [
