@@ -593,6 +593,13 @@ export const electionDB = {
     return dbGetByIndex<ElectionRecord>('elections', 'constituency', c);
   },
   save: async (e: ElectionRecord) => {
+    // Check previous status to detect transitions
+    let prevStatus: string | undefined;
+    try {
+      const prev = await dbGet<ElectionRecord>('elections', e.id);
+      prevStatus = prev?.status;
+    } catch {}
+
     try {
       await supabase.from('elections').upsert({
         id: e.id,
@@ -609,7 +616,28 @@ export const electionDB = {
     } catch (err) {
       console.warn('[electionDB] failed to sync to supabase:', err);
     }
-    return dbPut('elections', e);
+    await dbPut('elections', e);
+
+    // Write to master chain — fire-and-forget, non-fatal
+    try {
+      const { localBlockchain } = await import('./localBlockchain');
+      if (!prevStatus) {
+        // New election
+        await localBlockchain.recordElectionEvent('election_created', {
+          electionId: e.id, title: e.title, type: e.type,
+          constituency: e.constituency, state: e.state,
+          startDate: e.startDate, endDate: e.endDate,
+        });
+      } else if (prevStatus !== 'completed' && e.status === 'completed') {
+        // Election closed
+        await localBlockchain.recordElectionEvent('election_completed', {
+          electionId: e.id, title: e.title,
+          constituency: e.constituency, closedAt: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.warn('[electionDB] master chain write failed (non-fatal):', err);
+    }
   },
   delete: async (id: string) => {
     try { await supabase.from('elections').delete().eq('id', id); } catch {}
@@ -1261,6 +1289,20 @@ export async function seedDemoData(): Promise<void> {
     { id: 'elec-010', title: 'Jaipur Assembly Election',              description: 'State assembly election for Jaipur.',           type: 'vidhan-sabha',  status: 'active',    startDate: '2026-02-10T00:00:00Z', endDate: '2026-02-15T23:59:59Z', constituency: 'Jaipur',         state: 'Rajasthan',     createdAt: '2026-01-01T00:00:00Z' },
   ];
   for (const e of elections) await electionDB.save(e);
+
+  // ── Write election_completed blocks for already-finished elections ──
+  // (election_created blocks are written by electionDB.save above)
+  try {
+    const { localBlockchain } = await import('./localBlockchain');
+    for (const e of elections.filter(e => e.status === 'completed')) {
+      await localBlockchain.recordElectionEvent('election_completed', {
+        electionId: e.id, title: e.title,
+        constituency: e.constituency, closedAt: e.endDate,
+      });
+    }
+  } catch (err) {
+    console.warn('[seedDemoData] master chain election_completed write failed (non-fatal):', err);
+  }
 
   // ── Candidates ──
   const candidates: CandidateRecord[] = [
