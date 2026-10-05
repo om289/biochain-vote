@@ -27,11 +27,18 @@ export default function IdentityPage() {
   const [chainInfo, setChainInfo] = useState<{ length: number; is_valid: boolean; booths: any[] } | null>(null);
   const [assignedBooth, setAssignedBooth] = useState<{ booth_id: string; booth_name: string; constituency: string; assigned: boolean } | null>(null);
   const [boothQrDataUrl, setBoothQrDataUrl] = useState<string>('');
+  const [identityQrDataUrl, setIdentityQrDataUrl] = useState<string>('');
 
   useEffect(() => {
     // Generate DID for voter
     if (currentVoter) {
-      generateDID(currentVoter.id).then(setDid);
+      generateDID(currentVoter.id).then(did => {
+        setDid(did);
+        // Generate real identity QR once DID is ready
+        generateQRDataURL(`biochain://verify/${did}`, 160)
+          .then(setIdentityQrDataUrl)
+          .catch(() => {});
+      });
     }
     // Fetch blockchain info and assigned booth from local IndexedDB
     const fetchInfo = async () => {
@@ -318,14 +325,17 @@ export default function IdentityPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="text-center space-y-3">
-              <div className="mx-auto w-40 h-40 bg-white rounded-xl p-3 flex items-center justify-center">
-                <div className="w-full h-full border-4 border-black rounded-lg flex items-center justify-center relative">
-                  <div className="absolute top-1 left-1 w-6 h-6 border-4 border-black" />
-                  <div className="absolute top-1 right-1 w-6 h-6 border-4 border-black" />
-                  <div className="absolute bottom-1 left-1 w-6 h-6 border-4 border-black" />
-                  <QrCode className="w-8 h-8 text-black" />
+              {identityQrDataUrl ? (
+                <img
+                  src={identityQrDataUrl}
+                  alt="Identity QR Code"
+                  className="mx-auto rounded-lg border border-border bg-white p-2"
+                />
+              ) : (
+                <div className="mx-auto w-40 h-40 flex items-center justify-center">
+                  <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
                 </div>
-              </div>
+              )}
               <p className="text-[10px] text-muted-foreground font-mono break-all line-clamp-2" title={qrData}>{qrData}</p>
               <p className="text-xs text-muted-foreground">
                 Official Digital Identity Verification
