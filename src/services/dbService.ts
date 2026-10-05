@@ -132,10 +132,32 @@ export interface OfflineSyncItem {
   retries: number;
 }
 
+// ─── Activity Log ─────────────────────────────────────────────────────────────
+
+export type ActivityCategory =
+  | 'auth'
+  | 'vote'
+  | 'blockchain'
+  | 'admin'
+  | 'booth'
+  | 'election'
+  | 'system';
+
+export interface ActivityLogRecord {
+  /** Auto-incremented by IDB */
+  id?: number;
+  timestamp: string;
+  category: ActivityCategory;
+  action: string;
+  actor: string; // voterId, 'admin', or 'system'
+  detail?: string;
+  severity: 'info' | 'success' | 'warning' | 'error';
+}
+
 // ─── IndexedDB (local) ────────────────────────────────────────────────────────
 
 const DB_NAME = 'biochain-vote';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 let _db: IDBDatabase | null = null;
 
@@ -185,6 +207,13 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('booth_chains')) {
         const bc = db.createObjectStore('booth_chains', { keyPath: 'chainKey' });
         bc.createIndex('boothId', 'boothId', { unique: false });
+      }
+      // v7: persistent activity / audit log
+      if (!db.objectStoreNames.contains('activity_log')) {
+        const al = db.createObjectStore('activity_log', { keyPath: 'id', autoIncrement: true });
+        al.createIndex('timestamp', 'timestamp', { unique: false });
+        al.createIndex('category', 'category', { unique: false });
+        al.createIndex('actor', 'actor', { unique: false });
       }
     };
     req.onsuccess = (e) => { _db = (e.target as IDBOpenDBRequest).result; resolve(_db); };
@@ -321,11 +350,17 @@ export const voterDB = {
       console.error('[dbService] Error saving voter:', error);
       throw error;
     }
+    // Invalidate cache so next getAll() fetches fresh data from Supabase
+    _cachedVoters = null;
   },
 
   async delete(id: string): Promise<void> {
     if (_cachedVoters) _cachedVoters = _cachedVoters.filter(v => v.id !== id);
-    supabase.from('voters').delete().eq('id', id).then(() => {});
+    const { error } = await supabase.from('voters').delete().eq('id', id);
+    if (!error) {
+      // Invalidate cache so next getAll() reflects the deletion
+      _cachedVoters = null;
+    }
   },
 
   async count(): Promise<number> {
@@ -366,18 +401,17 @@ export const voterDB = {
 
   /** Check if voter has voted in a SPECIFIC election (prevents cross-election lockout) */
   async hasVotedInElection(voterId: string, electionId: string): Promise<boolean> {
-    try {
-      const { data, error } = await supabase
-        .from('votes')
-        .select('id')
-        .eq('voter_id', voterId)
-        .eq('election_id', electionId)
-        .maybeSingle();
-      if (!error && data) return true;
-      return false;
-    } catch {
-      return false;
+    const { data, error } = await supabase
+      .from('votes')
+      .select('id')
+      .eq('voter_id', voterId)
+      .eq('election_id', electionId)
+      .maybeSingle();
+    if (error) {
+      console.error('[hasVotedInElection] Supabase query error:', error.message);
+      throw new Error('Vote status check failed. Please retry.');
     }
+    return !!data;
   },
 
   /** Mark fingerprint as simulated-verified for a voter */
@@ -414,6 +448,7 @@ export const voteDB = {
       id: vote.id,
       voter_id: vote.voterId,
       candidate: vote.candidateId,
+      election_id: vote.electionId,
       created_at: vote.timestamp,
     });
     if (error) {
@@ -1330,3 +1365,35 @@ async function seedCompletedElection(electionId: string, candidates: string[], w
 
   console.log(`[seedDemoData] Generated 20 verifiable blocks for election ${electionId} (UI will scale analytics to lakhs)`);
 }
+
+// ─── Activity Log DB ──────────────────────────────────────────────────────────
+
+export const activityLogDB = {
+  async log(entry: Omit<ActivityLogRecord, 'id' | 'timestamp'>): Promise<void> {
+    const record: ActivityLogRecord = {
+      ...entry,
+      timestamp: new Date().toISOString(),
+    };
+    await dbPut<ActivityLogRecord>('activity_log', record);
+  },
+
+  async getAll(): Promise<ActivityLogRecord[]> {
+    const all = await dbGetAll<ActivityLogRecord>('activity_log');
+    return all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  },
+
+  async getByCategory(category: ActivityCategory): Promise<ActivityLogRecord[]> {
+    const all = await dbGetAll<ActivityLogRecord>('activity_log');
+    return all.filter(r => r.category === category).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  },
+
+  async clear(): Promise<void> {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('activity_log', 'readwrite');
+      tx.objectStore('activity_log').clear();
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+};
