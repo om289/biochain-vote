@@ -404,7 +404,6 @@ export const localBlockchain = {
         type: 'vote',
         payload: {
           voterHash: voteData.voterHash,
-          voterId: voteData.voterId,
           electionId: voteData.electionId,
           candidateId: voteData.candidateId,
           boothId,
@@ -455,13 +454,14 @@ export const localBlockchain = {
   },
 
   async hasVoterVoted(voterId: string, electionId: string): Promise<boolean> {
+    const voterHash = await sha256(`voter:${voterId}:${electionId}`);
     const blocks = await this.getVoteBlocksByElection(electionId);
-    return blocks.some(b => b.data.payload.voterId === voterId);
+    return blocks.some(b => b.data.payload.voterHash === voterHash);
   },
 
   async getVotersByElection(electionId: string): Promise<string[]> {
     const blocks = await this.getVoteBlocksByElection(electionId);
-    return [...new Set(blocks.map(b => b.data.payload.voterId))];
+    return [...new Set(blocks.map(b => b.data.payload.voterHash))];
   },
 
   // ── Booth sub-chain — verification ───────────────────────────────────────────
@@ -651,7 +651,6 @@ export const localBlockchain = {
       const leafHash = await sha256(JSON.stringify(block.data.payload));
       if (
         leafHash === searchKey ||
-        block.data.payload.voterId === searchKey ||
         block.hash === searchKey ||
         block.data.payload.voterHash === searchKey
       ) {
