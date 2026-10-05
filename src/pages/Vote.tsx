@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound, Server } from 'lucide-react';
+import { Vote as VoteIcon, Fingerprint, CheckCircle2, ArrowRight, ArrowLeft, AlertCircle, Loader2, KeyRound, Server, Lock, ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,12 +8,14 @@ import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
 import type { ElectionRecord, CandidateRecord } from '@/services/dbService';
 import { useNavigate } from 'react-router-dom';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 type Step = 'select-election' | 'select-candidate' | 'confirm' | 'verify-fingerprint' | 'success';
 
 const DEFAULT_PASSWORD = '1234';
 
 export default function VotePage() {
+  const isMobile = useIsMobile();
   const { currentVoter, addVoteReceipt } = useAppStore();
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select-election');
@@ -133,6 +135,42 @@ export default function VotePage() {
       setScanning(false);
     }
   };
+
+  if (isMobile) {
+    return (
+      <div className="p-4 max-w-md mx-auto py-12 space-y-5 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-500 shadow-md">
+          <Server className="w-8 h-8" />
+        </div>
+        <div className="space-y-1.5">
+          <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-[10px] px-2.5 py-0.5 font-semibold uppercase tracking-wider">
+            Statutory Hardware Policy
+          </Badge>
+          <h2 className="text-xl font-display font-bold text-foreground">Physical EVM Terminal Required</h2>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            In accordance with statutory election regulations, ballot casting is restricted exclusively to certified physical EVM polling terminals. Mobile devices are authorized exclusively for Election Observers and Polling Officers.
+          </p>
+        </div>
+        <Card className="glass border-border/60 text-left p-4 space-y-2 text-xs">
+          <div className="flex items-center gap-2 font-medium text-foreground">
+            <Lock className="w-4 h-4 text-primary" />
+            <span>Air-Gapped Polling Terminal Security</span>
+          </div>
+          <p className="text-muted-foreground leading-relaxed">
+            Please proceed to your assigned polling station booth. If you are an authorized polling officer, access your mobile officer console below.
+          </p>
+        </Card>
+        <div className="pt-2 flex flex-col gap-2">
+          <Button onClick={() => navigate('/admin')} className="w-full bg-primary shadow-md">
+            Open Polling Officer Console
+          </Button>
+          <Button onClick={() => navigate('/dashboard')} variant="outline" className="w-full border-border">
+            View Live Public Telemetry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentVoter) {
     return (

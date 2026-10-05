@@ -501,4 +501,12 @@ export const apiService = {
   async verifyMasterChain() {
     return localBlockchain.verifyMasterChain();
   },
+
+  async exportBoothPackage(boothId: string) {
+    return localBlockchain.exportBoothPackage(boothId);
+  },
+
+  async importBoothPackage(pkg: any) {
+    return localBlockchain.importBoothPackage(pkg);
+  },
 };

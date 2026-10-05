@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, BarChart3, Loader2, CheckCircle2, AlertCircle, Database, Info, Network, Hash, CloudUpload, Trophy, TrendingUp, Download, FileSpreadsheet } from 'lucide-react';
+import { ShieldCheck, BarChart3, Loader2, CheckCircle2, AlertCircle, Database, Info, Network, Hash, CloudUpload, Trophy, TrendingUp, Download, FileSpreadsheet, Printer, Award } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useAppStore } from '@/store/useAppStore';
 import { apiService } from '@/services/apiService';
 import type { ElectionRecord } from '@/services/dbService';
@@ -35,6 +36,7 @@ export default function AuditPage() {
   const [publishSuccess, setPublishSuccess] = useState(false);
   const [analytics, setAnalytics] = useState<any>(null);
   const [error, setError] = useState('');
+  const [certOpen, setCertOpen] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -202,6 +204,15 @@ export default function AuditPage() {
               >
                 <Download className="w-4 h-4 text-primary" />
                 Audit Manifest (JSON)
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCertOpen(true)}
+                className="gap-1.5 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-xs text-amber-400 font-medium"
+                title="View Official Certificate of Election Results"
+              >
+                <Award className="w-4 h-4 text-amber-400" />
+                Official Certificate
               </Button>
             </>
           )}
@@ -621,6 +632,110 @@ export default function AuditPage() {
 
         </motion.div>
       )}
+
+      {/* Official Election Certificate Dialog */}
+      <Dialog open={certOpen} onOpenChange={setCertOpen}>
+        <DialogContent className="max-w-2xl bg-card border-border p-6 max-h-[90vh] overflow-y-auto">
+          <div className="border-4 border-double border-primary/40 p-6 rounded-xl space-y-6 bg-background/60 shadow-xl print:m-0 print:border-black">
+            {/* Header */}
+            <div className="text-center space-y-1 pb-4 border-b border-border/80">
+              <div className="w-12 h-12 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto mb-2 text-primary">
+                <Award className="w-6 h-6" />
+              </div>
+              <h2 className="text-xl font-display font-black tracking-wider uppercase text-foreground">
+                Election Commission of India
+              </h2>
+              <p className="text-xs tracking-widest uppercase font-semibold text-primary">
+                BioChain Decentralized Tamper-Evident Ledger
+              </p>
+              <h3 className="text-base font-bold text-foreground mt-2">
+                Official Certificate of Election Results
+              </h3>
+            </div>
+
+            {/* Details */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-muted-foreground">Election Title:</span>
+                <p className="font-semibold text-foreground">{selectedElection?.title}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Constituency & State:</span>
+                <p className="font-semibold text-foreground">{selectedElection?.constituency}, {selectedElection?.state}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Certified Date:</span>
+                <p className="font-semibold text-foreground">{new Date().toLocaleDateString(undefined, { dateStyle: 'long' })}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Total Valid Ballots:</span>
+                <p className="font-bold text-foreground font-mono">{analytics?.totalVotes || 0}</p>
+              </div>
+            </div>
+
+            {/* Winner Declaration */}
+            {analytics?.winner ? (
+              <div className="p-4 rounded-xl bg-primary/10 border border-primary/30 text-center space-y-1">
+                <p className="text-[11px] uppercase font-bold tracking-wider text-primary">Duly Elected Candidate</p>
+                <h4 className="text-lg font-bold text-foreground font-display">
+                  {analytics.winner.candidateName}
+                </h4>
+                <p className="text-xs text-muted-foreground font-medium">
+                  {analytics.winner.partyName} — <strong className="text-foreground">{analytics.winner.votes} votes ({analytics.winner.percentage}%)</strong>
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Winning Margin: <strong className="text-foreground">{analytics.margin} votes</strong>
+                </p>
+              </div>
+            ) : (
+              <p className="text-center text-xs text-muted-foreground italic">No votes cast yet in this election.</p>
+            )}
+
+            {/* Cryptographic Ledger Seal */}
+            <div className="rounded-lg bg-muted/20 border border-border/60 p-3 space-y-2 text-[11px] font-mono">
+              <div className="flex items-center gap-1.5 font-bold text-foreground uppercase tracking-wider text-[10px]">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Cryptographic Proof & Merkle Anchor</span>
+              </div>
+              <p className="truncate">
+                <span className="text-muted-foreground">Master Merkle Root: </span>
+                <strong className="text-foreground">{analytics?.blockchain?.merkleRoot || 'Pending consensus merge'}</strong>
+              </p>
+              <p>
+                <span className="text-muted-foreground">Master Chain Height: </span>
+                <strong className="text-foreground">{analytics?.blockchain?.masterBlocks || 0} blocks</strong>
+              </p>
+              <p>
+                <span className="text-muted-foreground">Chain Verification: </span>
+                <strong className="text-emerald-400">{analytics?.blockchain?.masterValid ? 'PASSED (0 Tampering Detected)' : 'PENDING'}</strong>
+              </p>
+            </div>
+
+            {/* Official Signatures */}
+            <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs border-t border-border/80">
+              <div className="space-y-1">
+                <div className="h-10 border-b border-dashed border-border" />
+                <p className="font-semibold text-foreground">Returning Officer</p>
+                <p className="text-[10px] text-muted-foreground">Parliamentary Constituency</p>
+              </div>
+              <div className="space-y-1">
+                <div className="h-10 border-b border-dashed border-border" />
+                <p className="font-semibold text-foreground">General Observer</p>
+                <p className="text-[10px] text-muted-foreground">BioChain Election Commission</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2 print:hidden">
+              <Button onClick={() => window.print()} className="flex-1 bg-primary gap-1.5">
+                <Printer className="w-4 h-4" /> Print / Save as PDF
+              </Button>
+              <Button onClick={() => setCertOpen(false)} variant="outline" className="flex-1 border-border">
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

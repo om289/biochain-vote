@@ -771,4 +771,93 @@ export const localBlockchain = {
       },
     };
   },
+
+  // ── Air-Gapped Physical USB Export & Import ────────────────────────────────
+  /**
+   * Export an air-gapped booth sub-chain package (.biochain) for physical transfer.
+   */
+  async exportBoothPackage(boothId: string): Promise<{
+    format: string;
+    version: string;
+    exportedAt: string;
+    boothId: string;
+    blockCount: number;
+    voteCount: number;
+    merkleRoot: string;
+    tipHash: string;
+    blocks: BoothBlock[];
+    digitalSeal: string;
+  }> {
+    const chain = await _boothGetAll(boothId);
+    const summary = await this.getBoothChainSummary(boothId);
+    const blocksJson = JSON.stringify(chain);
+    const digitalSeal = await sha256(`BIOCHAIN_AIRGAP_SEAL:${boothId}:${summary.merkleRoot}:${blocksJson}`);
+
+    return {
+      format: 'BIOCHAIN_AIRGAP_PACKAGE',
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      boothId,
+      blockCount: chain.length,
+      voteCount: summary.voteCount,
+      merkleRoot: summary.merkleRoot,
+      tipHash: summary.tipHash,
+      blocks: chain,
+      digitalSeal,
+    };
+  },
+
+  /**
+   * Import an air-gapped booth sub-chain package into local IndexedDB.
+   */
+  async importBoothPackage(pkg: any): Promise<{
+    success: boolean;
+    boothId: string;
+    importedBlocks: number;
+    voteCount: number;
+    merkleRoot: string;
+  }> {
+    if (!pkg || pkg.format !== 'BIOCHAIN_AIRGAP_PACKAGE' || !pkg.boothId || !Array.isArray(pkg.blocks)) {
+      throw new Error('Invalid or corrupted BioChain air-gap package format');
+    }
+
+    // 1. Verify cryptographic seal
+    const blocksJson = JSON.stringify(pkg.blocks);
+    const expectedSeal = await sha256(`BIOCHAIN_AIRGAP_SEAL:${pkg.boothId}:${pkg.merkleRoot}:${blocksJson}`);
+    if (pkg.digitalSeal !== expectedSeal) {
+      throw new Error('Tamper detection alert: Digital seal mismatch on imported booth package!');
+    }
+
+    // 2. Validate chain integrity of every block
+    for (let i = 0; i < pkg.blocks.length; i++) {
+      const cur = pkg.blocks[i];
+      const recalc = await calculateHash({
+        index: cur.index,
+        timestamp: cur.timestamp,
+        data: cur.data,
+        previousHash: cur.previousHash,
+        nonce: cur.nonce,
+      });
+      if (recalc !== cur.hash) {
+        throw new Error(`Block #${cur.index} hash mismatch in imported package for booth ${pkg.boothId}`);
+      }
+      if (i > 0 && cur.previousHash !== pkg.blocks[i - 1].hash) {
+        throw new Error(`Block #${cur.index} previousHash broken chain link in imported package for booth ${pkg.boothId}`);
+      }
+    }
+
+    // 3. Write blocks into booth_chains IndexedDB store
+    for (const block of pkg.blocks) {
+      await _boothPut(block);
+    }
+
+    const summary = await this.getBoothChainSummary(pkg.boothId);
+    return {
+      success: true,
+      boothId: pkg.boothId,
+      importedBlocks: pkg.blocks.length,
+      voteCount: summary.voteCount,
+      merkleRoot: summary.merkleRoot,
+    };
+  },
 };

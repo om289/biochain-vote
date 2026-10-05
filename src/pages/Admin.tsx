@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database, GitFork, GitMerge, ShieldCheck, ShieldAlert, Copy, Check, RefreshCw, Layers, Link as LinkIcon, Network } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Search, Vote, Vote as VoteIcon, Calendar, MapPin, ArrowLeft, X, Save, Loader2, Fingerprint, Lock, QrCode, Server, UserPlus, UserMinus, CheckCircle2, XCircle, Database, GitFork, GitMerge, ShieldCheck, ShieldAlert, Copy, Check, RefreshCw, Layers, Link as LinkIcon, Network, Download, Upload, HardDrive, FileText, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -823,6 +823,8 @@ function BoothManager() {
   const [mergeError, setMergeError] = useState<string | null>(null);
   const [forkingBooth, setForkingBooth] = useState<string | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importStatus, setImportStatus] = useState<{ msg: string; ok: boolean } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -928,6 +930,43 @@ function BoothManager() {
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
+  const handleExportBoothPackage = async (boothId: string) => {
+    try {
+      const pkg = await apiService.exportBoothPackage(boothId);
+      const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${boothId}-airgap-ledger.biochain`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Export failed: ${e.message}`);
+    }
+  };
+
+  const handleImportPackageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const res = await apiService.importBoothPackage(parsed);
+      setImportStatus({
+        msg: `Successfully imported booth "${res.boothId}": ${res.importedBlocks} blocks, ${res.voteCount} votes. Cryptographic seal & chain verified!`,
+        ok: true,
+      });
+      await load();
+    } catch (err: any) {
+      setImportStatus({
+        msg: `Import failed: ${err.message}`,
+        ok: false,
+      });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const getVoterName = (voterId: string) => {
     const v = voters.find(vt => vt.id === voterId);
     return v ? v.name : voterId.slice(0, 8) + '...';
@@ -979,6 +1018,22 @@ function BoothManager() {
 
           <div className="flex items-center gap-2 flex-wrap">
             <Button
+              onClick={() => fileInputRef.current?.click()}
+              variant="outline"
+              size="sm"
+              className="text-xs h-8 border-primary/40 text-primary hover:bg-primary/10 shadow-sm font-medium"
+              title="Import air-gapped sub-chain package (.biochain) from physical USB"
+            >
+              <Upload className="w-3.5 h-3.5 mr-1.5" /> Import USB Package
+            </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImportPackageFile}
+              accept=".biochain,.json"
+              className="hidden"
+            />
+            <Button
               onClick={() => { setMergeResult(null); setMergeError(null); setMergeOpen(true); }}
               className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8 shadow-sm font-medium"
             >
@@ -995,6 +1050,15 @@ function BoothManager() {
             </Button>
           </div>
         </div>
+
+        {importStatus && (
+          <div className={`p-2.5 rounded-lg text-xs flex items-center justify-between gap-2 border ${importStatus.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-destructive/10 border-destructive/30 text-destructive'}`}>
+            <span className="font-medium">{importStatus.msg}</span>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-current hover:bg-transparent" onClick={() => setImportStatus(null)}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-1 border-t border-border/40">
           <div className="p-2 rounded-lg bg-background/50 border border-border/30">
@@ -1185,17 +1249,29 @@ function BoothManager() {
                       )}
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs h-7 border-primary/40 text-primary hover:bg-primary/10"
-                      onClick={() => handleForkBooth(booth.booth_id)}
-                      disabled={forkingBooth === booth.booth_id}
-                      title="Create or anchor a sub-chain for this booth from current master chain tip"
-                    >
-                      <GitFork className="w-3 h-3 mr-1" />
-                      {forkingBooth === booth.booth_id ? 'Anchoring...' : 'Fork / Anchor Chain'}
-                    </Button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7 border-border hover:border-primary/40 text-muted-foreground hover:text-foreground"
+                        onClick={() => handleExportBoothPackage(booth.booth_id)}
+                        title="Export this station's sub-chain onto USB for air-gapped tallying"
+                      >
+                        <Download className="w-3 h-3 mr-1" />
+                        Export USB
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7 border-primary/40 text-primary hover:bg-primary/10"
+                        onClick={() => handleForkBooth(booth.booth_id)}
+                        disabled={forkingBooth === booth.booth_id}
+                        title="Create or anchor a sub-chain for this booth from current master chain tip"
+                      >
+                        <GitFork className="w-3 h-3 mr-1" />
+                        {forkingBooth === booth.booth_id ? 'Anchoring...' : 'Fork / Anchor'}
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">

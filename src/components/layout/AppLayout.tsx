@@ -26,8 +26,33 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const isActive = (path: string) => location.pathname === path;
 
+  const mobileOfficerItems = [
+    { to: '/admin', label: 'Admin', icon: Settings },
+    { to: '/audit', label: 'Consensus', icon: FileCheck },
+    { to: '/dashboard', label: 'Telemetry', icon: Home },
+    { to: '/explorer', label: 'Ledger', icon: Layers },
+  ];
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-background">
+      {/* Mobile Top Officer Status Bar */}
+      {isMobile && (
+        <header className="sticky top-0 z-40 border-b border-border bg-card/85 backdrop-blur-md px-3.5 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center glow-primary">
+              <ShieldCheck className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <span className="font-display font-bold text-xs text-foreground tracking-wide">BioChain EVM</span>
+              <span className="text-[10px] text-biochain-warning font-semibold ml-1.5 px-1.5 py-0.5 rounded bg-biochain-warning/10 border border-biochain-warning/30">
+                Officer Mobile
+              </span>
+            </div>
+          </div>
+          <OfflineSyncMonitor variant="compact" />
+        </header>
+      )}
+
       {/* Desktop Sidebar */}
       {!isMobile && (
         <aside className="hidden md:flex flex-col w-64 border-r border-border bg-card/50 backdrop-blur-sm">
@@ -96,42 +121,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      {/* Mobile Bottom Tab Bar */}
+      {/* Mobile Bottom Tab Bar — Dedicated to Officer / Admin Operations */}
       {isMobile && (
         <nav
           className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/90 backdrop-blur-xl safe-bottom"
           aria-label="Mobile navigation"
         >
           <div className="flex items-center justify-around py-2 px-2 overflow-x-auto">
-            {navItems.map((item) => (
+            {mobileOfficerItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-all min-w-[54px] flex-shrink-0',
+                  'flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-all min-w-[60px] flex-shrink-0',
                   isActive(item.to)
-                    ? 'text-primary'
-                    : 'text-muted-foreground'
+                    ? 'text-primary font-bold'
+                    : 'text-muted-foreground hover:text-foreground'
                 )}
                 aria-current={isActive(item.to) ? 'page' : undefined}
               >
-                <item.icon className={cn('w-5 h-5', isActive(item.to) && 'drop-shadow-[0_0_6px_hsl(var(--primary))]')} />
-                <span className="text-[10px] font-medium">{item.label}</span>
-              </NavLink>
-            ))}
-            {isAdmin && adminItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  'flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg transition-all min-w-[54px] flex-shrink-0 text-biochain-warning',
-                  isActive(item.to)
-                    ? 'text-biochain-warning font-bold'
-                    : 'text-muted-foreground hover:text-biochain-warning'
-                )}
-                aria-current={isActive(item.to) ? 'page' : undefined}
-              >
-                <item.icon className="w-5 h-5" />
+                <item.icon className={cn('w-5 h-5', isActive(item.to) && 'drop-shadow-[0_0_6px_hsl(var(--primary))] text-primary')} />
                 <span className="text-[10px] font-medium">{item.label}</span>
               </NavLink>
             ))}
