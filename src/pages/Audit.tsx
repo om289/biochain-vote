@@ -134,23 +134,34 @@ export default function AuditPage() {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportCSV = () => {
-    if (!selectedElection || !analytics) return;
-    const headers = ['Candidate Name', 'Party', 'Vote Count', 'Percentage'];
-    const rows = (analytics.results || []).map((r: any) => [
-      `"${r.candidateName || r.candidateId}"`,
-      `"${r.partyName || 'Independent'}"`,
-      r.voteCount,
-      `${r.percentage}%`
-    ]);
-    const csvContent = [headers.join(','), ...rows.map((row: any) => row.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const handleExportCSV = async () => {
+    if (!selectedElection) return;
+    const voteRecords = await apiService.getVotesByElection(selectedElection.id);
+    const rows: string[][] = [['block_id', 'voter_hash', 'candidate_id', 'election_id', 'timestamp', 'block_hash']];
+    for (const v of voteRecords) {
+      rows.push([
+        String(v.blockIndex ?? ''),
+        String(v.voterId ?? ''),
+        String(v.candidateId ?? ''),
+        String(v.electionId ?? ''),
+        String(v.timestamp ?? ''),
+        String(v.blockHash ?? ''),
+      ]);
+    }
+    const csv = rows.map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `election-tally-${selectedElection.id.slice(0, 8)}.csv`;
-    a.click();
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `biochain-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = () => {
+    window.print();
   };
 
   if (loading) {
@@ -726,7 +737,7 @@ export default function AuditPage() {
             </div>
 
             <div className="flex gap-2 pt-2 print:hidden">
-              <Button onClick={() => window.print()} className="flex-1 bg-primary gap-1.5">
+              <Button onClick={handlePrint} className="flex-1 bg-primary gap-1.5">
                 <Printer className="w-4 h-4" /> Print / Save as PDF
               </Button>
               <Button onClick={() => setCertOpen(false)} variant="outline" className="flex-1 border-border">
