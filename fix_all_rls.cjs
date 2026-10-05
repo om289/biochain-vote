@@ -1,6 +1,12 @@
 const { Client } = require('pg');
+
+if (!process.env.DATABASE_URL && !process.env.SUPABASE_DB_URL) {
+  console.error('ERROR: Set DATABASE_URL or SUPABASE_DB_URL env var before running this script.');
+  process.exit(1);
+}
+
 const client = new Client({
-  connectionString: 'postgresql://postgres:SiddharthOmLakshay@db.hbuxgqnbbheyuwxmquvp.supabase.co:5432/postgres'
+  connectionString: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL
 });
 async function run() {
   try {
