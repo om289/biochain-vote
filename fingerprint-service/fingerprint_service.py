@@ -27,7 +27,12 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '../.env'))
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080",
+])
 
 # ─── Supabase config ─────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -124,28 +129,30 @@ def cast_vote():
     required_fields = ["voter_id", "candidate_id", "election_id"]
     if not all(k in data for k in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
-    
-    try:
-        # Add vote to pending pool with strict validation
-        vote = voting_chain.add_vote(data["voter_id"], data["candidate_id"], data["election_id"])
-        
-        # Auto-mine for demo purposes so it's instantly on the chain
-        block = voting_chain.mine_pending_votes()
-        if block:
-            return jsonify({
-                "message": "Vote successfully cast and secured on the blockchain!",
-                "vote": vote,
-                "block_index": block["index"],
-                "block_hash": block["previous_hash"]
-            }), 201
-        else:
-            return jsonify({"error": "Failed to mine block"}), 500
-    except ValueError as e:
-        logger.warning(f"API Error: {str(e)}")
-        return jsonify({"error": str(e)}), 403
-    except Exception as e:
-        logger.error(f"Unexpected API Error: {str(e)}")
-        return jsonify({"error": "Internal server error occurred while processing the vote"}), 500
+
+    # Vote recording moved to browser IndexedDB blockchain.
+    # Python service now handles biometric verification only.
+    return jsonify({
+        "status": "blockchain_disabled",
+        "message": "Vote recording moved to browser IndexedDB blockchain. Python service handles biometric verification only."
+    }), 200
+
+
+@app.route('/api/chain/export', methods=['GET'])
+def export_chains():
+    import os, json
+    data_dir = os.path.join(os.path.dirname(__file__), 'blockchain', 'data')
+    chains = {}
+    if os.path.isdir(data_dir):
+        for fname in os.listdir(data_dir):
+            if fname.endswith('_chain.json'):
+                fpath = os.path.join(data_dir, fname)
+                try:
+                    with open(fpath, 'r') as f:
+                        chains[fname] = json.load(f)
+                except Exception as e:
+                    chains[fname] = {"error": str(e)}
+    return jsonify({"chains": chains}), 200
 
 @app.route("/api/blocks", methods=["GET"])
 def get_chain():
@@ -216,8 +223,30 @@ def get_merkle_proof(tx_hash):
 
 # ─── ZK-Commitment API ───────────────────────────────────────────────────────
 
-# In-memory store for vote commitments (in production, persist to DB)
-_vote_commitments: dict = {}
+import logging
+
+_ZK_COMMITMENTS_FILE = os.path.join(
+    os.path.dirname(__file__), 'blockchain', 'data', 'zk_commitments.json'
+)
+
+def _load_zk_commitments() -> dict:
+    try:
+        if os.path.exists(_ZK_COMMITMENTS_FILE):
+            with open(_ZK_COMMITMENTS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.warning(f'[ZK] Failed to load commitments from disk: {e}')
+    return {}
+
+def _save_zk_commitments(commitments: dict) -> None:
+    try:
+        os.makedirs(os.path.dirname(_ZK_COMMITMENTS_FILE), exist_ok=True)
+        with open(_ZK_COMMITMENTS_FILE, 'w') as f:
+            json.dump(commitments, f)
+    except Exception as e:
+        logging.error(f'[ZK] Failed to save commitments to disk: {e}')
+
+_vote_commitments: dict = _load_zk_commitments()
 
 
 @app.route("/api/zk-commit", methods=["POST"])
@@ -227,6 +256,7 @@ def submit_zk_commitment():
     The voter sends commitment = SHA256(candidateId || nonce) before voting.
     Later they can reveal the nonce to prove their vote without exposing it now.
     """
+    global _vote_commitments
     data = request.json
     if not data or not all(k in data for k in ["voter_id", "commitment", "election_id"]):
         return jsonify({"error": "voter_id, commitment, and election_id required"}), 400
@@ -237,6 +267,7 @@ def submit_zk_commitment():
         "timestamp": time.time(),
         "revealed": False,
     }
+    _save_zk_commitments(_vote_commitments)
     logger.info(f"ZK commitment stored for voter {data['voter_id']} in election {data['election_id']}")
     return jsonify({"message": "Commitment accepted", "commitment": data["commitment"]}), 201
 
@@ -247,6 +278,7 @@ def verify_zk_commitment():
     Verify a zero-knowledge commitment by revealing the preimage.
     The voter provides candidateId + nonce; we check SHA256(candidateId || nonce) == stored commitment.
     """
+    global _vote_commitments
     data = request.json
     if not data or not all(k in data for k in ["voter_id", "election_id", "candidate_id", "nonce"]):
         return jsonify({"error": "voter_id, election_id, candidate_id, and nonce required"}), 400
@@ -263,6 +295,7 @@ def verify_zk_commitment():
     match = recomputed == stored['commitment']
     if match:
         stored['revealed'] = True
+        _save_zk_commitments(_vote_commitments)
         logger.info(f"ZK commitment verified for voter {data['voter_id']}")
 
     return jsonify({
