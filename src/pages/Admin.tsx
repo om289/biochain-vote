@@ -90,7 +90,7 @@ export default function AdminPage() {
       </motion.div>
 
       {/* Tamper-Evidence Monitor Banner */}
-      <TamperMonitor />
+      <TamperMonitorBanner />
 
       <Tabs defaultValue="voters" className="space-y-4">
         <TabsList className="bg-card border border-border flex-wrap h-auto gap-1 p-1">
@@ -139,6 +139,33 @@ export default function AdminPage() {
           <LocalDBViewer />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ====== TAMPER MONITOR BANNER ======
+
+function TamperMonitorBanner() {
+  const [status, setStatus] = useState<{ valid: boolean; blocks: number } | null>(null);
+
+  useEffect(() => {
+    apiService.getBlockchainStatus().then(s => {
+      setStatus({ valid: s.isValid, blocks: s.blockCount });
+    }).catch(() => {});
+  }, []);
+
+  if (!status) return null;
+
+  return (
+    <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border text-sm ${
+      status.valid
+        ? 'bg-biochain-success/10 border-biochain-success/30 text-biochain-success'
+        : 'bg-destructive/10 border-destructive/30 text-destructive'
+    }`}>
+      <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+      <span>
+        Tamper Monitor: Chain is <strong>{status.valid ? 'valid' : 'INVALID'}</strong> — {status.blocks} block{status.blocks !== 1 ? 's' : ''}
+      </span>
     </div>
   );
 }

@@ -52,7 +52,7 @@ const App = () => (
           <Route path="/verify" element={<ProtectedRoute><Verify /></ProtectedRoute>} />
           <Route path="/booth" element={<BoothInfo />} />
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/admin" element={<AppLayout><Admin /></AppLayout>} />
+          <Route path="/admin" element={<Admin />} />
           <Route path="/audit" element={<ProtectedRoute><Audit /></ProtectedRoute>} />
           <Route path="/activity-log" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
           <Route path="/identity" element={<ProtectedRoute><Identity /></ProtectedRoute>} />
