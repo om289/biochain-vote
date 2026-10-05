@@ -65,10 +65,8 @@ export default function IdentityPage() {
             assigned: true,
           });
           // Generate real QR code asynchronously
-          generateQRDataURL(
-            `biochain://voter/${currentVoter.id}/booth/${boothAssignment.booth_id}`,
-            160
-          ).then(setBoothQrDataUrl).catch(() => {});
+          const boothQrPayload = `${window.location.origin}/verify?voter=${encodeURIComponent(currentVoter.id)}&booth=${encodeURIComponent(boothAssignment.booth_id)}`;
+          generateQRDataURL(boothQrPayload, 160).then(setBoothQrDataUrl).catch(() => {});
         } else {
           setAssignedBooth({ booth_id: '', booth_name: '', constituency: '', assigned: false });
         }
@@ -203,7 +201,8 @@ export default function IdentityPage() {
   }
 
   // ── Voter Identity View ──
-  const qrData = `biochain://verify/${did}`;
+  const appBaseUrl = window.location.origin;
+  const qrData = `${appBaseUrl}/verify?did=${encodeURIComponent(did)}&voter=${encodeURIComponent(currentVoter.id)}`;
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto space-y-6">

@@ -348,7 +348,7 @@ function VoterManager() {
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground font-mono break-all">
-                biochain://voter/{qrVoter.id}
+                {window.location.origin}/verify?voter={qrVoter.id}
               </p>
             </div>
           )}
