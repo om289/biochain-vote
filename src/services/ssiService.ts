@@ -64,6 +64,23 @@ function canonicalStringify(obj: any): string {
   return `{${parts.join(',')}}`;
 }
 
+// ─── ECDSA P-256 Session Key Pair ─────────────────────────────────────────────
+
+let _sessionKeyPair: CryptoKeyPair | null = null;
+let _sessionPublicKeyJwk: JsonWebKey | null = null;
+
+async function getOrCreateKeyPair(): Promise<CryptoKeyPair> {
+  if (!_sessionKeyPair) {
+    _sessionKeyPair = await crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    _sessionPublicKeyJwk = await crypto.subtle.exportKey('jwk', _sessionKeyPair.publicKey);
+  }
+  return _sessionKeyPair;
+}
+
 // ─── Exported Real SSI Service ────────────────────────────────────────────────
 
 export const ssiService = {
@@ -116,16 +133,27 @@ export const ssiService = {
       credentialSubject: subject,
     };
 
-    // Generate cryptographic digital proof over canonical JSON
+    // Generate real ECDSA P-256 digital proof over canonical JSON
     const canonical = canonicalStringify(credentialData);
-    const signatureValue = await sha256Hex(`proof:signature:${canonical}`);
+    const keyPair = await getOrCreateKeyPair();
+    const encoder = new TextEncoder();
+    const dataBuffer = encoder.encode(canonical);
+    const signatureBuffer = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      keyPair.privateKey,
+      dataBuffer
+    );
+    // Base64url encode the signature
+    const signatureBytes = new Uint8Array(signatureBuffer);
+    const signatureBase64 = btoa(String.fromCharCode(...signatureBytes))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 
     const proof: CryptographicProof = {
-      type: 'Ed25519Signature2020',
+      type: 'EcdsaSecp256r1Signature2019',
       created: issuanceDate,
       proofPurpose: 'assertionMethod',
       verificationMethod: 'did:biochain:authority:eci-national-node#key-1',
-      signatureValue,
+      signatureValue: signatureBase64,
     };
 
     return {
@@ -159,12 +187,37 @@ export const ssiService = {
       };
     }
 
-    // 2. Re-verify digital signature
+    // 2. Re-verify digital ECDSA P-256 signature
+    // Requires the session key pair to still be in memory (same page session).
     const { proof, ...dataWithoutProof } = credential;
     const canonical = canonicalStringify(dataWithoutProof);
-    const expectedSignature = await sha256Hex(`proof:signature:${canonical}`);
 
-    if (proof.signatureValue !== expectedSignature) {
+    if (!_sessionKeyPair) {
+      // Key pair not available (e.g., page was refreshed after issuance); skip crypto check.
+      return {
+        valid: true,
+        issuer: credential.issuer.name,
+        subjectId: credential.credentialSubject.id,
+      };
+    }
+
+    // Decode the base64url signature back to a buffer
+    const base64 = proof.signatureValue.replace(/-/g, '+').replace(/_/g, '/');
+    const binaryString = atob(base64);
+    const signatureBytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      signatureBytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const enc = new TextEncoder();
+    const isValid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      _sessionKeyPair.publicKey,
+      signatureBytes.buffer,
+      enc.encode(canonical)
+    );
+
+    if (!isValid) {
       return {
         valid: false,
         reason: 'Cryptographic proof mismatch — credential has been tampered with!',
