@@ -234,14 +234,25 @@ async function _masterGetAll(): Promise<Block[]> {
 }
 
 async function _masterGetLatest(): Promise<Block | undefined> {
-  return blockDB.getLast() as Promise<Block | undefined>;
+  const result = await blockDB.getLast() as Promise<Block | undefined>;
+  if (result) {
+    console.log(`[_masterGetLatest] Found latest block #${result.index} hash=${result.hash.slice(0,16)}...`);
+  } else {
+    console.log(`[_masterGetLatest] No latest block found (empty chain)`);
+  }
+  return result;
 }
 
 async function _masterSave(block: Block): Promise<void> {
+  console.log(`[_masterSave] Saving block #${block.index} to IndexedDB: hash=${block.hash.slice(0,16)}... type=${block.data.type}`);
   await blockDB.save(block);
+  console.log(`[_masterSave] Block #${block.index} saved successfully`);
 }
 
 async function _masterCreateGenesis(): Promise<Block> {
+  console.log('[_masterCreateGenesis] CALLED - Creating new genesis block');
+  console.trace('[_masterCreateGenesis] Call stack:');
+  
   const block: Omit<Block, 'hash'> = {
     index: 0,
     timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
@@ -258,8 +269,9 @@ async function _masterCreateGenesis(): Promise<Block> {
   };
   const hash = await calculateHash(block);
   const genesis: Block = { ...block, hash };
-  console.log(`[_masterCreateGenesis] Creating genesis block with hash: ${hash}`);
+  console.log(`[_masterCreateGenesis] Genesis created with hash: ${hash}`);
   await _masterSave(genesis);
+  console.log(`[_masterCreateGenesis] Genesis saved to IndexedDB`);
   return genesis;
 }
 
@@ -300,17 +312,50 @@ export const localBlockchain = {
           
           // Auto-repair: delete all blocks and rebuild from genesis
           try {
+            console.warn('[localBlockchain] Clearing corrupted blocks...');
             const db = await _openDB();
+            
+            // First, manually delete all blocks
+            const allBlocks = await new Promise<Block[]>((resolve) => {
+              const tx = db.transaction('blocks', 'readonly');
+              const req = tx.objectStore('blocks').getAll();
+              req.onsuccess = () => resolve(req.result as Block[]);
+            });
+            console.log(`[localBlockchain] Found ${allBlocks.length} blocks to delete`);
+            
+            // Delete each block individually
             await new Promise<void>((resolve, reject) => {
-              const tx = db.transaction(['blocks', 'booth_chains'], 'readwrite');
-              tx.objectStore('blocks').clear();
-              tx.objectStore('booth_chains').clear();
+              const tx = db.transaction('blocks', 'readwrite');
+              const store = tx.objectStore('blocks');
+              allBlocks.forEach(b => store.delete(b.index));
               tx.oncomplete = () => {
-                console.warn('[localBlockchain] Corrupted chain cleared - rebuilding from genesis');
+                console.log('[localBlockchain] All blocks deleted');
                 resolve();
               };
               tx.onerror = () => reject(tx.error);
             });
+            
+            // Also clear booth chains
+            await new Promise<void>((resolve, reject) => {
+              const tx = db.transaction('booth_chains', 'readwrite');
+              tx.objectStore('booth_chains').clear();
+              tx.oncomplete = () => {
+                console.log('[localBlockchain] Booth chains cleared');
+                resolve();
+              };
+              tx.onerror = () => reject(tx.error);
+            });
+            
+            // Wait a moment for IndexedDB to settle
+            await new Promise(r => setTimeout(r, 100));
+            
+            // Verify everything is gone
+            const remaining = await blockDB.count();
+            console.log(`[localBlockchain] Blocks remaining after clear: ${remaining}`);
+            
+            if (remaining > 0) {
+              console.error(`[localBlockchain] WARNING: ${remaining} blocks still exist after clear!`);
+            }
             
             // Recreate genesis
             await _masterCreateGenesis();
