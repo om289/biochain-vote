@@ -342,14 +342,37 @@ export const localBlockchain = {
   ): Promise<Block> {
     // Auto-create per-election master chain when a new election is born
     if (type === 'election_created' && payload.electionId) {
-      try {
-        await this.createElectionChain(
-          payload.electionId,
-          payload.title || payload.electionId
-        );
-      } catch (e) {
-        console.warn('[localBlockchain] createElectionChain failed (non-fatal):', e);
+      // Check whether the election chain already exists BEFORE creating it.
+      // If it does, the global audit chain already has an election_created block for
+      // this election — skip addBlock to prevent duplicate audit entries.
+      const existingChain = await _electionGetAll(payload.electionId);
+      const alreadyRecorded = existingChain.length > 0;
+
+      if (!alreadyRecorded) {
+        try {
+          await this.createElectionChain(
+            payload.electionId,
+            payload.title || payload.electionId
+          );
+        } catch (e) {
+          console.warn('[localBlockchain] createElectionChain failed (non-fatal):', e);
+        }
+        // Only write to global audit chain the first time
+        return this.addBlock({ type, payload });
       }
+
+      // Election chain already exists — skip the duplicate global audit write
+      console.info(`[localBlockchain] recordElectionEvent skipped duplicate election_created for ${payload.electionId}`);
+      // Return a synthetic block-like object so callers do not break
+      const existingTip = existingChain[existingChain.length - 1];
+      return {
+        index: existingTip.index,
+        timestamp: existingTip.timestamp,
+        data: { type, payload },
+        previousHash: existingTip.previousHash,
+        hash: existingTip.hash,
+        nonce: existingTip.nonce,
+      } as Block;
     }
     return this.addBlock({ type, payload });
   },

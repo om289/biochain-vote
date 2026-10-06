@@ -1621,9 +1621,11 @@ function BoothManager() {
     }
 
     const summaries: Record<string, BoothChainSummary> = {};
+    // Use the election selected for merge (or the first available election) to scope summaries
+    const summaryElectionId = mergeElectionId || (elecs.length > 0 ? elecs[0].id : undefined);
     for (const b of boothDetails) {
       try {
-        summaries[b.booth_id] = await apiService.getBoothChainSummary(b.booth_id);
+        summaries[b.booth_id] = await apiService.getBoothChainSummary(b.booth_id, summaryElectionId);
       } catch (e) {
         console.warn(`Failed to get chain summary for ${b.booth_id}:`, e);
       }
