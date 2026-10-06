@@ -258,6 +258,7 @@ async function _masterCreateGenesis(): Promise<Block> {
   };
   const hash = await calculateHash(block);
   const genesis: Block = { ...block, hash };
+  console.log(`[_masterCreateGenesis] Creating genesis block with hash: ${hash}`);
   await _masterSave(genesis);
   return genesis;
 }
@@ -339,7 +340,11 @@ export const localBlockchain = {
 
   async getLatestBlock(): Promise<Block> {
     const last = await _masterGetLatest();
-    if (!last) return _masterCreateGenesis();
+    if (!last) {
+      console.warn('[getLatestBlock] No latest block found - creating genesis');
+      return _masterCreateGenesis();
+    }
+    console.log(`[getLatestBlock] Latest block #${last.index} hash: ${last.hash.slice(0, 16)}...`);
     return last;
   },
 
@@ -395,6 +400,8 @@ export const localBlockchain = {
     }
 
     const prev = await this.getLatestBlock();
+    console.log(`[addBlock] Building new block #${prev.index + 1} on top of block #${prev.index} (hash: ${prev.hash.slice(0, 16)}...)`);
+    
     const b: Omit<Block, 'hash'> = {
       index: prev.index + 1,
       timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
@@ -404,8 +411,11 @@ export const localBlockchain = {
     };
     const hash = await calculateHash(b);
     const block: Block = { ...b, hash };
+    
+    console.log(`[addBlock] New block #${block.index} created: hash=${hash.slice(0, 16)}... prevHash=${block.previousHash.slice(0, 16)}... type=${data.type}`);
+    
     await _masterSave(block);
-    console.log(`[localBlockchain] Added block #${block.index} type=${data.type} electionId=${data.payload?.electionId || 'N/A'}`);
+    console.log(`[addBlock] Block #${block.index} saved to IndexedDB`);
     return block;
   },
 
