@@ -474,7 +474,7 @@ export const apiService = {
   },
 
   // ===== Distributed Booth Sub-Chain & Merge Operations =====
-  async forkBoothChain(boothId: string, electionId?: string) {
+  async forkBoothChain(boothId: string, electionId: string) {
     return localBlockchain.forkForBooth(boothId, electionId);
   },
 
