@@ -905,13 +905,23 @@ function BoothSyncPanel() {
                   : <ShieldAlert className="w-5 h-5 text-destructive" />
                 }
               </div>
-              <div>
+              <div className="flex-1">
                 <p className="font-semibold text-sm">Master Chain</p>
                 <p className="text-xs text-muted-foreground">
                   {masterVerification ? `${masterVerification.totalBlocks} blocks · ${
                     masterVerification.valid ? 'Integrity OK' : 'INTEGRITY VIOLATION'
                   }` : 'Loading...'}
                 </p>
+                {masterVerification && !masterVerification.valid && masterVerification.error && (
+                  <p className="text-xs text-destructive mt-1 font-mono">
+                    ⚠️ {masterVerification.error}
+                  </p>
+                )}
+                {masterVerification && !masterVerification.valid && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Check browser console (F12) for detailed error logs
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2">

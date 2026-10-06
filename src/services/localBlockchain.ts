@@ -427,7 +427,7 @@ export const localBlockchain = {
   async addElectionBlock(electionId: string, data: Block['data']): Promise<BoothBlock> {
     let tip = await _electionGetLatest(electionId);
     if (!tip) {
-      await this.createElectionChain(electionId, electionId);
+      await this.createElectionChain(electionId, `Election ${electionId}`);
       tip = await _electionGetLatest(electionId);
     }
     const prev = tip!;
@@ -471,8 +471,9 @@ export const localBlockchain = {
     if (electionTip) {
       masterTip = electionTip;
     } else {
-      // Election chain not yet created — auto-create it now
-      masterTip = await this.createElectionChain(electionId, electionId);
+      // Election chain not yet created — auto-create it now with electionId as placeholder title
+      // (will be overwritten when recordElectionEvent fires with the real title)
+      masterTip = await this.createElectionChain(electionId, `Election ${electionId}`);
     }
 
     // 1. Write booth_fork record on master chain (audit trail)
@@ -628,11 +629,25 @@ export const localBlockchain = {
         nonce: cur.nonce,
       });
       if (recalc !== cur.hash) {
+        console.error(`[CHAIN INTEGRITY] Booth ${boothId} election ${electionId} block #${i} HASH MISMATCH:`, {
+          chainKey: cur.chainKey,
+          blockIndex: cur.index,
+          blockType: cur.data.type,
+          expected: recalc,
+          actual: cur.hash,
+        });
         return { valid: false, blockCount: chain.length, error: `Booth ${boothId} block #${i} hash mismatch — tampered!` };
       }
 
       // Verify chain link
       if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+        console.error(`[CHAIN INTEGRITY] Booth ${boothId} election ${electionId} block #${i} BROKEN LINK:`, {
+          chainKey: cur.chainKey,
+          blockIndex: cur.index,
+          previousHashInBlock: cur.previousHash,
+          expectedPrevHash: chain[i - 1].hash,
+          prevBlockIndex: chain[i - 1].index,
+        });
         return { valid: false, blockCount: chain.length, error: `Booth ${boothId} block #${i} broken link` };
       }
     }
@@ -653,9 +668,23 @@ export const localBlockchain = {
           data: cur.data, previousHash: cur.previousHash, nonce: cur.nonce,
         });
         if (recalc !== cur.hash) {
+          console.error(`[CHAIN INTEGRITY] Election ${electionId} block #${i} HASH MISMATCH:`, {
+            blockIndex: cur.index,
+            chainKey: cur.chainKey,
+            expected: recalc,
+            actual: cur.hash,
+            blockData: cur.data
+          });
           return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Election ${electionId} master block #${i} hash mismatch` };
         }
         if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+          console.error(`[CHAIN INTEGRITY] Election ${electionId} block #${i} BROKEN LINK:`, {
+            blockIndex: cur.index,
+            chainKey: cur.chainKey,
+            previousHashInBlock: cur.previousHash,
+            expectedPrevHash: chain[i - 1].hash,
+            prevBlockIndex: chain[i - 1].index
+          });
           return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Election ${electionId} master block #${i} broken chain link` };
         }
       }
@@ -673,9 +702,24 @@ export const localBlockchain = {
         data: cur.data, previousHash: cur.previousHash, nonce: cur.nonce,
       });
       if (recalc !== cur.hash) {
+        console.error(`[CHAIN INTEGRITY] Master block #${i} HASH MISMATCH:`, {
+          blockIndex: cur.index,
+          blockType: cur.data.type,
+          expected: recalc,
+          actual: cur.hash,
+          timestamp: cur.timestamp,
+          payload: cur.data.payload
+        });
         return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Master block #${i} hash mismatch` };
       }
       if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+        console.error(`[CHAIN INTEGRITY] Master block #${i} BROKEN LINK:`, {
+          blockIndex: cur.index,
+          blockType: cur.data.type,
+          previousHashInBlock: cur.previousHash,
+          expectedPrevHash: chain[i - 1].hash,
+          prevBlockType: chain[i - 1].data.type
+        });
         return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Master block #${i} broken chain link` };
       }
     }

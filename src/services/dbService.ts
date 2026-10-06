@@ -622,7 +622,8 @@ export const electionDB = {
     try {
       const { localBlockchain } = await import('./localBlockchain');
       if (!prevStatus) {
-        // New election
+        // New election - only record if blockchain doesn't already have it
+        console.log(`[electionDB.save] New election detected: ${e.id} - ${e.title}`);
         await localBlockchain.recordElectionEvent('election_created', {
           electionId: e.id, title: e.title, type: e.type,
           constituency: e.constituency, state: e.state,
@@ -630,6 +631,7 @@ export const electionDB = {
         });
       } else if (prevStatus !== 'completed' && e.status === 'completed') {
         // Election closed
+        console.log(`[electionDB.save] Election completed: ${e.id}`);
         await localBlockchain.recordElectionEvent('election_completed', {
           electionId: e.id, title: e.title,
           constituency: e.constituency, closedAt: new Date().toISOString(),
