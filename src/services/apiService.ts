@@ -15,7 +15,10 @@ export const apiService = {
    */
   async initialize(): Promise<void> {
     try {
-      await seedDemoData();
+      // Only initialize the blockchain genesis — do NOT seed demo data
+      // Real data comes from Supabase. Demo seed is disabled to prevent
+      // fake blocks polluting the chain.
+      await adminDB.save({ id: 'admin-001', name: 'Election Commissioner', pin: '1234' });
       await localBlockchain.initialize();
     } catch (e) {
       console.warn('[apiService] initialize error (non-fatal):', e);
