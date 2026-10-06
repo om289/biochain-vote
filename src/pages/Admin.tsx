@@ -914,9 +914,35 @@ function BoothSyncPanel() {
                 </p>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={load}>
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh All
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={async () => {
+                  if (confirm('⚠️ Clear all blockchain data from IndexedDB?\n\nThis will:\n• Delete all local blockchain records\n• Force rebuild from Supabase data\n• Fix any duplicate/corrupted blocks\n\nYou cannot undo this. Continue?')) {
+                    try {
+                      const dbName = 'biochain-vote';
+                      const deleteRequest = indexedDB.deleteDatabase(dbName);
+                      deleteRequest.onsuccess = () => {
+                        toast.success('IndexedDB cleared! Refreshing page...');
+                        setTimeout(() => window.location.reload(), 1500);
+                      };
+                      deleteRequest.onerror = () => {
+                        toast.error('Failed to clear IndexedDB');
+                      };
+                    } catch (e: any) {
+                      toast.error(`Error: ${e.message}`);
+                    }
+                  }
+                }}
+                className="border-destructive/30 text-destructive hover:bg-destructive/10"
+              >
+                <HardDrive className="w-3.5 h-3.5 mr-1.5" /> Clear IndexedDB
+              </Button>
+              <Button variant="outline" size="sm" onClick={load}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh All
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
