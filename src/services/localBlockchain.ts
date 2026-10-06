@@ -279,6 +279,7 @@ async function _masterCreateGenesis(): Promise<Block> {
 
 let _initializationInProgress = false;
 let _initializationPromise: Promise<void> | null = null;
+let _repairInProgress = false; // HARD lock during repair
 
 // ─── Main Service ─────────────────────────────────────────────────────────────
 
@@ -309,6 +310,10 @@ export const localBlockchain = {
         if (!verification.valid) {
           console.error(`[localBlockchain] CORRUPTED CHAIN DETECTED on startup - attempting auto-repair`);
           console.error(`[localBlockchain] Error: ${verification.error}`);
+          
+          // Set HARD lock to prevent any blockchain operations during repair
+          _repairInProgress = true;
+          console.warn('[localBlockchain] REPAIR LOCK ENGAGED - All blockchain operations blocked');
           
           // Auto-repair: delete all blocks and rebuild from genesis
           try {
@@ -346,8 +351,8 @@ export const localBlockchain = {
               tx.onerror = () => reject(tx.error);
             });
             
-            // Wait a moment for IndexedDB to settle
-            await new Promise(r => setTimeout(r, 100));
+            // Wait longer for IndexedDB to fully settle
+            await new Promise(r => setTimeout(r, 500));
             
             // Verify everything is gone
             const remaining = await blockDB.count();
@@ -355,6 +360,7 @@ export const localBlockchain = {
             
             if (remaining > 0) {
               console.error(`[localBlockchain] WARNING: ${remaining} blocks still exist after clear!`);
+              console.error('[localBlockchain] This should be IMPOSSIBLE with repair lock engaged!');
             }
             
             // Recreate genesis
@@ -363,6 +369,10 @@ export const localBlockchain = {
           } catch (e) {
             console.error('[localBlockchain] Auto-repair failed:', e);
             throw e;
+          } finally {
+            // Release HARD lock
+            _repairInProgress = false;
+            console.log('[localBlockchain] REPAIR LOCK RELEASED');
           }
         } else {
           console.log('[localBlockchain] Chain integrity verified OK');
@@ -426,8 +436,15 @@ export const localBlockchain = {
 
   /** Append any block to the master chain */
   async addBlock(data: Block['data']): Promise<Block> {
+    // HARD STOP during repair
+    if (_repairInProgress) {
+      console.error('[addBlock] BLOCKED - Chain repair in progress. Cannot add blocks.');
+      throw new Error('Chain repair in progress - cannot add blocks');
+    }
+
     // Wait for initialization to complete
     if (_initializationInProgress && _initializationPromise) {
+      console.log('[addBlock] Waiting for initialization to complete...');
       await _initializationPromise;
     }
 
