@@ -273,6 +273,34 @@ export const localBlockchain = {
     const count = await blockDB.count();
     if (count === 0) {
       await _masterCreateGenesis();
+    } else {
+      // Verify chain integrity on startup
+      const verification = await this.verifyChain();
+      if (!verification.valid) {
+        console.error(`[localBlockchain] CORRUPTED CHAIN DETECTED on startup - attempting auto-repair`);
+        console.error(`[localBlockchain] Error: ${verification.error}`);
+        
+        // Auto-repair: delete all blocks and rebuild from genesis
+        try {
+          const db = await _openDB();
+          await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(['blocks', 'booth_chains'], 'readwrite');
+            tx.objectStore('blocks').clear();
+            tx.objectStore('booth_chains').clear();
+            tx.oncomplete = () => {
+              console.warn('[localBlockchain] Corrupted chain cleared - rebuilding from genesis');
+              resolve();
+            };
+            tx.onerror = () => reject(tx.error);
+          });
+          
+          // Recreate genesis
+          await _masterCreateGenesis();
+          console.log('[localBlockchain] Chain repaired successfully');
+        } catch (e) {
+          console.error('[localBlockchain] Auto-repair failed:', e);
+        }
+      }
     }
   },
 
