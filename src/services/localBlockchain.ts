@@ -262,6 +262,11 @@ async function _masterCreateGenesis(): Promise<Block> {
   return genesis;
 }
 
+// ─── Initialization lock ───────────────────────────────────────────────────────
+
+let _initializationInProgress = false;
+let _initializationPromise: Promise<void> | null = null;
+
 // ─── Main Service ─────────────────────────────────────────────────────────────
 
 export const localBlockchain = {
@@ -270,38 +275,59 @@ export const localBlockchain = {
 
   /** Create master genesis block if the chain is empty */
   async initialize(): Promise<void> {
-    const count = await blockDB.count();
-    if (count === 0) {
-      await _masterCreateGenesis();
-    } else {
-      // Verify chain integrity on startup
-      const verification = await this.verifyChain();
-      if (!verification.valid) {
-        console.error(`[localBlockchain] CORRUPTED CHAIN DETECTED on startup - attempting auto-repair`);
-        console.error(`[localBlockchain] Error: ${verification.error}`);
-        
-        // Auto-repair: delete all blocks and rebuild from genesis
-        try {
-          const db = await _openDB();
-          await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction(['blocks', 'booth_chains'], 'readwrite');
-            tx.objectStore('blocks').clear();
-            tx.objectStore('booth_chains').clear();
-            tx.oncomplete = () => {
-              console.warn('[localBlockchain] Corrupted chain cleared - rebuilding from genesis');
-              resolve();
-            };
-            tx.onerror = () => reject(tx.error);
-          });
-          
-          // Recreate genesis
-          await _masterCreateGenesis();
-          console.log('[localBlockchain] Chain repaired successfully');
-        } catch (e) {
-          console.error('[localBlockchain] Auto-repair failed:', e);
-        }
-      }
+    // Prevent concurrent initialization
+    if (_initializationInProgress) {
+      if (_initializationPromise) return _initializationPromise;
+      return;
     }
+
+    _initializationInProgress = true;
+    _initializationPromise = (async () => {
+      try {
+        const count = await blockDB.count();
+        if (count === 0) {
+          console.log('[localBlockchain] Empty chain - creating genesis');
+          await _masterCreateGenesis();
+          return;
+        }
+
+        // Verify chain integrity on startup
+        const verification = await this.verifyChain();
+        if (!verification.valid) {
+          console.error(`[localBlockchain] CORRUPTED CHAIN DETECTED on startup - attempting auto-repair`);
+          console.error(`[localBlockchain] Error: ${verification.error}`);
+          
+          // Auto-repair: delete all blocks and rebuild from genesis
+          try {
+            const db = await _openDB();
+            await new Promise<void>((resolve, reject) => {
+              const tx = db.transaction(['blocks', 'booth_chains'], 'readwrite');
+              tx.objectStore('blocks').clear();
+              tx.objectStore('booth_chains').clear();
+              tx.oncomplete = () => {
+                console.warn('[localBlockchain] Corrupted chain cleared - rebuilding from genesis');
+                resolve();
+              };
+              tx.onerror = () => reject(tx.error);
+            });
+            
+            // Recreate genesis
+            await _masterCreateGenesis();
+            console.log('[localBlockchain] Chain repaired successfully - genesis recreated');
+          } catch (e) {
+            console.error('[localBlockchain] Auto-repair failed:', e);
+            throw e;
+          }
+        } else {
+          console.log('[localBlockchain] Chain integrity verified OK');
+        }
+      } finally {
+        _initializationInProgress = false;
+        _initializationPromise = null;
+      }
+    })();
+
+    return _initializationPromise;
   },
 
   // ── Master chain reads ───────────────────────────────────────────────────────
@@ -350,6 +376,11 @@ export const localBlockchain = {
 
   /** Append any block to the master chain */
   async addBlock(data: Block['data']): Promise<Block> {
+    // Wait for initialization to complete
+    if (_initializationInProgress && _initializationPromise) {
+      await _initializationPromise;
+    }
+
     // Check for duplicate election_created in global audit chain
     if (data.type === 'election_created' && data.payload?.electionId) {
       const chain = await _masterGetAll();
