@@ -322,6 +322,19 @@ export const localBlockchain = {
 
   /** Append any block to the master chain */
   async addBlock(data: Block['data']): Promise<Block> {
+    // Check for duplicate election_created in global audit chain
+    if (data.type === 'election_created' && data.payload?.electionId) {
+      const chain = await _masterGetAll();
+      const exists = chain.find(
+        b => b.data.type === 'election_created' && 
+             b.data.payload?.electionId === data.payload.electionId
+      );
+      if (exists) {
+        console.warn(`[localBlockchain] addBlock skipped duplicate election_created for ${data.payload.electionId} at block #${exists.index}`);
+        return exists;
+      }
+    }
+
     const prev = await this.getLatestBlock();
     const b: Omit<Block, 'hash'> = {
       index: prev.index + 1,
@@ -333,6 +346,7 @@ export const localBlockchain = {
     const hash = await calculateHash(b);
     const block: Block = { ...b, hash };
     await _masterSave(block);
+    console.log(`[localBlockchain] Added block #${block.index} type=${data.type} electionId=${data.payload?.electionId || 'N/A'}`);
     return block;
   },
 

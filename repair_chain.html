@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BioChain - Repair Blockchain</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      color: #fbbf24;
+      margin-top: 0;
+    }
+    button {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover {
+      background: #dc2626;
+    }
+    button:disabled {
+      background: #64748b;
+      cursor: not-allowed;
+    }
+    .success {
+      background: #10b981;
+    }
+    .success:hover {
+      background: #059669;
+    }
+    pre {
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 13px;
+      border: 1px solid #334155;
+    }
+    .warning {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 16px;
+      border-radius: 8px;
+      border-left: 4px solid #f59e0b;
+      margin-bottom: 20px;
+    }
+    .step {
+      margin: 16px 0;
+      padding: 12px;
+      background: #334155;
+      border-radius: 6px;
+    }
+    .step-number {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      background: #fbbf24;
+      color: #0f172a;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 28px;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔧 BioChain Blockchain Repair Tool</h1>
+    <p>This tool completely clears your local blockchain and forces a clean rebuild from Supabase data.</p>
+    
+    <div class="warning">
+      <strong>⚠️ Important:</strong> This will delete ALL local blockchain data including vote blocks. 
+      Only use this if you have a corrupted chain and have already run the Supabase duplicate fix script.
+    </div>
+
+    <div class="step">
+      <span class="step-number">1</span>
+      <strong>Before you click:</strong> Make sure you ran the SQL fix: <code>node fix_supabase_duplicates.cjs</code>
+    </div>
+
+    <div class="step">
+      <span class="step-number">2</span>
+      <strong>Click the button below</strong> to delete the corrupted IndexedDB database
+    </div>
+
+    <div class="step">
+      <span class="step-number">3</span>
+      <strong>Reload the app</strong> after seeing the success message
+    </div>
+
+    <button id="repairBtn" onclick="repairBlockchain()">🔧 Clear IndexedDB & Force Rebuild</button>
+    
+    <div id="output" style="margin-top: 20px;"></div>
+  </div>
+
+  <script>
+    async function repairBlockchain() {
+      const btn = document.getElementById('repairBtn');
+      const output = document.getElementById('output');
+      
+      btn.disabled = true;
+      output.innerHTML = '<pre>Starting repair process...</pre>';
+
+      try {
+        // Step 1: Delete the entire database
+        output.innerHTML += '<pre>Step 1: Deleting IndexedDB database "biochain-vote"...</pre>';
+        
+        await new Promise((resolve, reject) => {
+          const deleteReq = indexedDB.deleteDatabase('biochain-vote');
+          
+          deleteReq.onsuccess = () => {
+            output.innerHTML += '<pre>✅ IndexedDB deleted successfully</pre>';
+            resolve();
+          };
+          
+          deleteReq.onerror = () => {
+            output.innerHTML += '<pre>❌ Failed to delete IndexedDB</pre>';
+            reject(new Error('Delete failed'));
+          };
+          
+          deleteReq.onblocked = () => {
+            output.innerHTML += '<pre>⚠️ Delete blocked - close all other tabs of this app and try again</pre>';
+            reject(new Error('Delete blocked'));
+          };
+        });
+
+        // Success
+        output.innerHTML += '<pre style="color: #10b981; font-weight: bold;">✅ Repair complete!</pre>';
+        output.innerHTML += '<pre>Now reload the biochain-vote app. The blockchain will rebuild cleanly from Supabase data.</pre>';
+        
+        btn.textContent = '✅ Repair Complete - Reload App Now';
+        btn.className = 'success';
+        btn.disabled = false;
+        btn.onclick = () => window.close();
+
+      } catch (err) {
+        output.innerHTML += `<pre style="color: #ef4444;">❌ Error: ${err.message}</pre>`;
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
