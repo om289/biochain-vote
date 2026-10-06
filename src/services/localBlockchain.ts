@@ -205,6 +205,27 @@ async function _boothCount(boothId: string): Promise<number> {
   return blocks.length;
 }
 
+// ─── Election master chain helpers ────────────────────────────────────────────
+// Election master blocks live in booth_chains store with boothId = 'master'
+// chainKey format: `master:${electionId}:${index}`
+
+async function _electionGetAll(electionId: string): Promise<BoothBlock[]> {
+  return _boothGetAll('master', electionId);
+}
+
+async function _electionGet(electionId: string, index: number): Promise<BoothBlock | undefined> {
+  return _boothGet('master', electionId, index);
+}
+
+async function _electionPut(block: BoothBlock): Promise<void> {
+  return _boothPut(block);
+}
+
+async function _electionGetLatest(electionId: string): Promise<BoothBlock | undefined> {
+  const all = await _electionGetAll(electionId);
+  return all.length > 0 ? all[all.length - 1] : undefined;
+}
+
 // ─── Master chain helpers ──────────────────────────────────────────────────────
 
 async function _masterGetAll(): Promise<Block[]> {
@@ -257,7 +278,8 @@ export const localBlockchain = {
 
   // ── Master chain reads ───────────────────────────────────────────────────────
 
-  async getChain(): Promise<Block[]> {
+  async getChain(electionId?: string): Promise<Block[] | BoothBlock[]> {
+    if (electionId) return _electionGetAll(electionId);
     return _masterGetAll();
   },
 
@@ -288,7 +310,11 @@ export const localBlockchain = {
     return blockDB.getByIndex(index) as Promise<Block | undefined>;
   },
 
-  async getBlockCount(): Promise<number> {
+  async getBlockCount(electionId?: string): Promise<number> {
+    if (electionId) {
+      const chain = await _electionGetAll(electionId);
+      return chain.length;
+    }
     return blockDB.count();
   },
 
@@ -314,7 +340,88 @@ export const localBlockchain = {
     type: 'election_created' | 'election_completed',
     payload: Record<string, any>
   ): Promise<Block> {
+    // Auto-create per-election master chain when a new election is born
+    if (type === 'election_created' && payload.electionId) {
+      try {
+        await this.createElectionChain(
+          payload.electionId,
+          payload.title || payload.electionId
+        );
+      } catch (e) {
+        console.warn('[localBlockchain] createElectionChain failed (non-fatal):', e);
+      }
+    }
     return this.addBlock({ type, payload });
+  },
+
+  // ── Election master chain ─────────────────────────────────────────────────────
+
+  /**
+   * Create genesis block for an election's master chain.
+   * Idempotent: if the chain already has a genesis block, returns the existing one.
+   * chainKey format: `master:${electionId}:0`
+   */
+  async createElectionChain(electionId: string, electionTitle: string): Promise<BoothBlock> {
+    const existing = await _electionGetAll(electionId);
+    if (existing.length > 0) return existing[0];
+
+    const genesisData: Omit<BoothBlock, 'hash'> = {
+      index: 0,
+      chainKey: `master:${electionId}:0`,
+      boothId: 'master',
+      electionId,
+      timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      data: {
+        type: 'genesis',
+        payload: {
+          message: 'Election master chain genesis',
+          electionId,
+          title: electionTitle,
+          createdAt: new Date().toISOString(),
+        },
+      },
+      previousHash: '0'.repeat(64),
+      nonce: 0,
+    };
+    const hash = await calculateHash(genesisData);
+    const genesis: BoothBlock = { ...genesisData, hash };
+    await _electionPut(genesis);
+    console.info(`[localBlockchain] Election master chain created for ${electionId}`);
+    return genesis;
+  },
+
+  /** Return all blocks in an election's master chain (sorted ascending). */
+  async getElectionChain(electionId: string): Promise<BoothBlock[]> {
+    return _electionGetAll(electionId);
+  },
+
+  /** Return last block of an election's master chain, or undefined if it doesn't exist yet. */
+  async getElectionMasterTip(electionId: string): Promise<BoothBlock | undefined> {
+    return _electionGetLatest(electionId);
+  },
+
+  /** Append a block to an election's master chain. Auto-creates genesis if missing. */
+  async addElectionBlock(electionId: string, data: Block['data']): Promise<BoothBlock> {
+    let tip = await _electionGetLatest(electionId);
+    if (!tip) {
+      await this.createElectionChain(electionId, electionId);
+      tip = await _electionGetLatest(electionId);
+    }
+    const prev = tip!;
+    const blockData: Omit<BoothBlock, 'hash'> = {
+      index: prev.index + 1,
+      chainKey: `master:${electionId}:${prev.index + 1}`,
+      boothId: 'master',
+      electionId,
+      timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      data,
+      previousHash: prev.hash,
+      nonce: Math.floor(Math.random() * 1_000_000),
+    };
+    const hash = await calculateHash(blockData);
+    const block: BoothBlock = { ...blockData, hash };
+    await _electionPut(block);
+    return block;
   },
 
   // ── Booth sub-chain — FORK ───────────────────────────────────────────────────
@@ -335,8 +442,15 @@ export const localBlockchain = {
     );
     if (alreadyForked) return alreadyForked;
 
-    // Capture master chain tip
-    const masterTip = await this.getLatestBlock();
+    // Capture election master chain tip (create chain if it doesn't exist yet)
+    let masterTip: Block | BoothBlock;
+    const electionTip = await this.getElectionMasterTip(electionId);
+    if (electionTip) {
+      masterTip = electionTip;
+    } else {
+      // Election chain not yet created — auto-create it now
+      masterTip = await this.createElectionChain(electionId, electionId);
+    }
 
     // 1. Write booth_fork record on master chain (audit trail)
     await this.addBlock({
@@ -344,8 +458,8 @@ export const localBlockchain = {
       payload: {
         boothId,
         electionId,
-        masterTipHash: masterTip.hash,
-        masterTipIndex: masterTip.index,
+        electionMasterTipHash: masterTip.hash,
+        electionMasterTipIndex: masterTip.index,
         forkedAt: new Date().toISOString(),
       },
     });
@@ -362,9 +476,9 @@ export const localBlockchain = {
         payload: {
           boothId,
           electionId,
-          masterTipHash: masterTip.hash,
-          masterTipIndex: masterTip.index,
-          message: `Booth ${boothId} forked from master at block #${masterTip.index} for election ${electionId}`,
+          electionMasterTipHash: masterTip.hash,
+          electionMasterTipIndex: masterTip.index,
+          message: `Booth ${boothId} forked from election ${electionId} master chain at block #${masterTip.index}`,
         },
       },
       previousHash: masterTip.hash,
@@ -503,8 +617,29 @@ export const localBlockchain = {
     return { valid: true, blockCount: chain.length };
   },
 
-  /** Verify the MASTER chain integrity */
-  async verifyChain(): Promise<{ valid: boolean; totalBlocks: number; invalidBlockIndex?: number; error?: string }> {
+  /** Verify the MASTER chain integrity (global audit chain, or election chain if electionId given) */
+  async verifyChain(electionId?: string): Promise<{ valid: boolean; totalBlocks: number; invalidBlockIndex?: number; error?: string }> {
+    if (electionId) {
+      // Verify the election's own master chain
+      const chain = await _electionGetAll(electionId);
+      if (chain.length === 0) return { valid: true, totalBlocks: 0 };
+      for (let i = 0; i < chain.length; i++) {
+        const cur = chain[i];
+        const recalc = await calculateHash({
+          index: cur.index, timestamp: cur.timestamp,
+          data: cur.data, previousHash: cur.previousHash, nonce: cur.nonce,
+        });
+        if (recalc !== cur.hash) {
+          return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Election ${electionId} master block #${i} hash mismatch` };
+        }
+        if (i > 0 && cur.previousHash !== chain[i - 1].hash) {
+          return { valid: false, totalBlocks: chain.length, invalidBlockIndex: i, error: `Election ${electionId} master block #${i} broken chain link` };
+        }
+      }
+      return { valid: true, totalBlocks: chain.length };
+    }
+
+    // Original global audit chain verification
     const chain = await _masterGetAll();
     if (chain.length === 0) return { valid: true, totalBlocks: 0 };
 
@@ -603,8 +738,8 @@ export const localBlockchain = {
     const masterMerkleRoot = getMerkleRoot(masterTree);
     const totalVotes = boothSummaries.reduce((sum, s) => sum + s.voteCount, 0);
 
-    // 5. Write MERGE block to master chain
-    const mergeBlock = await this.addBlock({
+    // 5a. Write MERGE block to election's master chain
+    const mergeBoothBlock = await this.addElectionBlock(electionId, {
       type: 'merge',
       payload: {
         electionId,
@@ -619,6 +754,18 @@ export const localBlockchain = {
           isValid: s.isValid,
           tipHash: s.tipHash,
         })),
+      },
+    });
+
+    // 5b. Also write a lightweight audit record on the global chain (keeps audit log complete)
+    const mergeBlock = await this.addBlock({
+      type: 'merge',
+      payload: {
+        electionId,
+        mergedAt: mergeBoothBlock.timestamp,
+        totalVotes,
+        masterMerkleRoot,
+        electionMasterChainHash: mergeBoothBlock.hash,
       },
     });
 
@@ -763,8 +910,9 @@ export const localBlockchain = {
       });
     }
 
-    // Master chain + booth chain status
-    const masterVerification = await this.verifyChain();
+    // Election master chain + booth chain status
+    const electionChainVerification = await this.verifyChain(electionId);
+    const electionChain = await _electionGetAll(electionId);
     const merkle = await this.getMerkleRoot();
     const boothSummaries: BoothChainSummary[] = [];
     for (const bid of boothIds) {
@@ -781,12 +929,13 @@ export const localBlockchain = {
       timeSeries,
       boothBreakdown: boothBreakdownArr,
       blockchain: {
-        masterBlocks: (await _masterGetAll()).length,
-        masterValid: masterVerification.valid,
+        masterBlocks: electionChain.length,
+        masterValid: electionChainVerification.valid,
         merkleRoot: merkle.merkleRoot,
         leafCount: merkle.leafCount,
         totalBooths: boothIds.length,
         boothSummaries,
+        auditChainBlocks: (await _masterGetAll()).length,
       },
     };
   },

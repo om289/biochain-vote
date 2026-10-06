@@ -444,16 +444,16 @@ export const apiService = {
     return res.valid;
   },
 
-  async getBlockchain() {
-    return localBlockchain.getChain();
+  async getBlockchain(electionId?: string) {
+    return localBlockchain.getChain(electionId);
   },
 
   async getBlockByHash(hash: string) {
     return localBlockchain.getBlockByHash(hash);
   },
 
-  async getBlockCount() {
-    return localBlockchain.getBlockCount();
+  async getBlockCount(electionId?: string) {
+    return localBlockchain.getBlockCount(electionId);
   },
 
   async getBlockchainStatus(): Promise<{ blockCount: number; isValid: boolean; merkleRoot: string }> {
@@ -508,5 +508,18 @@ export const apiService = {
 
   async importBoothPackage(pkg: any) {
     return localBlockchain.importBoothPackage(pkg);
+  },
+
+  // ===== Election master chain =====
+  async createElectionChain(electionId: string, title: string) {
+    return localBlockchain.createElectionChain(electionId, title);
+  },
+
+  async getElectionChain(electionId: string) {
+    return localBlockchain.getElectionChain(electionId);
+  },
+
+  async getElectionMasterTip(electionId: string) {
+    return localBlockchain.getElectionMasterTip(electionId);
   },
 };

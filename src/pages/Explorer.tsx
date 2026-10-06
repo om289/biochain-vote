@@ -6,20 +6,29 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { localBlockchain, type Block } from '@/services/localBlockchain';
+import { apiService } from '@/services/apiService';
 import { format } from 'date-fns';
 
 export default function Explorer() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBlock, setSelectedBlock] = useState<Block | null>(null);
+  const [elections, setElections] = useState<any[]>([]);
+  const [selectedElectionId, setSelectedElectionId] = useState<string>('');
+
+  useEffect(() => {
+    // Load elections list once
+    apiService.getElections().then(setElections).catch(() => {});
+  }, []);
 
   useEffect(() => {
     loadChain();
-  }, []);
+  }, [selectedElectionId]);
 
   const loadChain = async () => {
-    const chain = await localBlockchain.getChain();
+    const chain = await localBlockchain.getChain(selectedElectionId || undefined) as Block[];
     // Sort descending (newest blocks first)
     setBlocks(chain.sort((a, b) => b.index - a.index));
     if (chain.length > 0) {
@@ -55,6 +64,22 @@ export default function Explorer() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+      </div>
+
+      {/* Chain selector */}
+      <div className="flex items-center gap-3">
+        <span className="text-sm text-muted-foreground whitespace-nowrap">View chain:</span>
+        <Select value={selectedElectionId} onValueChange={setSelectedElectionId}>
+          <SelectTrigger className="w-72 bg-background/50 border-border">
+            <SelectValue placeholder="Global Audit Chain" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Global Audit Chain</SelectItem>
+            {elections.map(e => (
+              <SelectItem key={e.id} value={e.id}>{e.title} — Master Chain</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <Tabs defaultValue="list" className="space-y-6">

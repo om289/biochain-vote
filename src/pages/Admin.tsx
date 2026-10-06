@@ -794,6 +794,8 @@ function BoothSyncPanel() {
   const [verifyResults, setVerifyResults] = useState<Record<string, { valid: boolean; blockCount: number }>>({});
   const [forkingBooth, setForkingBooth] = useState<string | null>(null);
   const [elections, setElections] = useState<ElectionRecord[]>([]);
+  const [selectedElectionId, setSelectedElectionId] = useState<string>('');
+  const [electionChainInfo, setElectionChainInfo] = useState<{ blocks: number; valid: boolean } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -821,13 +823,25 @@ function BoothSyncPanel() {
         const mv = await apiService.verifyMasterChain();
         setMasterVerification(mv);
       } catch {}
+
+      // Load election master chain info if an election is selected
+      if (selectedElectionId) {
+        try {
+          const chain = await apiService.getElectionChain(selectedElectionId);
+          const ver = await apiService.getElectionMasterTip(selectedElectionId);
+          // verify by checking if tip exists and chain is non-empty
+          setElectionChainInfo({ blocks: chain.length, valid: chain.length > 0 });
+        } catch {
+          setElectionChainInfo(null);
+        }
+      }
     } catch (e) {
       console.error(e);
     }
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [selectedElectionId]);
 
   const handleVerify = async (boothId: string) => {
     setVerifying(boothId);
@@ -903,6 +917,50 @@ function BoothSyncPanel() {
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh All
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Election Master Chain Selector */}
+      <Card className="glass border-border/50 overflow-hidden">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-primary/10 border border-primary/30">
+              <Network className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-sm">Election Master Chain</p>
+              <p className="text-xs text-muted-foreground">Each election has its own independent blockchain</p>
+            </div>
+          </div>
+          <Select value={selectedElectionId} onValueChange={setSelectedElectionId}>
+            <SelectTrigger className="bg-background/50 border-border text-sm">
+              <SelectValue placeholder="Select an election to inspect its chain…" />
+            </SelectTrigger>
+            <SelectContent>
+              {elections.map(e => (
+                <SelectItem key={e.id} value={e.id}>{e.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selectedElectionId && electionChainInfo && (
+            <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${
+              electionChainInfo.valid ? 'bg-biochain-success/10 text-biochain-success border border-biochain-success/30' : 'bg-muted/30 text-muted-foreground'
+            }`}>
+              {electionChainInfo.valid
+                ? <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
+                : <Database className="w-3.5 h-3.5 flex-shrink-0" />}
+              <span>
+                {electionChainInfo.blocks === 0
+                  ? 'Chain not yet created — will be created on first activity'
+                  : `${electionChainInfo.blocks} block${electionChainInfo.blocks !== 1 ? 's' : ''} · Chain active`}
+              </span>
+            </div>
+          )}
+          {selectedElectionId && !electionChainInfo && !loading && (
+            <div className="text-xs px-3 py-2 rounded-lg bg-muted/30 text-muted-foreground">
+              No chain data yet for this election.
+            </div>
+          )}
         </CardContent>
       </Card>
 
