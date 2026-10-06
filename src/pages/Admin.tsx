@@ -858,14 +858,15 @@ function BoothSyncPanel() {
     setForkingBooth(boothId);
     try {
       const booth = booths.find(b => b.booth_id === boothId);
-      const electionId = (booth?.assigned_elections || [])[0];
-      if (!electionId) {
+      const assignedElections = booth?.assigned_elections || [];
+      if (assignedElections.length === 0) {
         toast.error('No election assigned to this booth. Assign an election first.');
         setForkingBooth(null);
         return;
       }
-      await apiService.forkBoothChain(boothId, electionId);
-      toast.success(`Booth ${booth?.name || boothId} forked successfully`);
+      // Fork all assigned elections so each gets its own sub-chain
+      await Promise.all(assignedElections.map(eid => apiService.forkBoothChain(boothId, eid)));
+      toast.success(`Booth ${booth?.name || boothId} forked for ${assignedElections.length} election(s)`);
       await load();
     } catch (e: any) {
       toast.error(`Fork failed: ${e.message}`);
@@ -1669,14 +1670,15 @@ function BoothManager() {
     setForkingBooth(boothId);
     try {
       const targetBooth = booths.find(b => b.booth_id === boothId);
-      const electionId = (targetBooth?.assigned_elections || [])[0];
-      if (!electionId) {
+      const assignedElections = targetBooth?.assigned_elections || [];
+      if (assignedElections.length === 0) {
         toast.error('No election assigned to this booth. Assign an election first.');
         setForkingBooth(null);
         return;
       }
-      await apiService.forkBoothChain(boothId, electionId);
-      toast.success(`Booth ${targetBooth?.name || boothId} anchored to master chain`);
+      // Anchor to election master chain for every assigned election
+      await Promise.all(assignedElections.map(eid => apiService.forkBoothChain(boothId, eid)));
+      toast.success(`Booth ${targetBooth?.name || boothId} anchored to master chain for ${assignedElections.length} election(s)`);
       await load();
     } catch (e: any) {
       toast.error(`Fork failed: ${e.message}`);
