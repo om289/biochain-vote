@@ -770,21 +770,9 @@ export const adminDB = {
 
 export const blockDB = {
   getAll: async () => {
-    try {
-      const { data, error } = await supabase.from('blocks').select('*').order('index', { ascending: true });
-      if (!error && data && data.length > 0) {
-        const records = data.map((b: any) => ({
-          index: b.index,
-          timestamp: new Date(b.timestamp).toISOString().replace(/\.\d{3}Z$/, 'Z'),
-          data: b.data,
-          previousHash: b.previous_hash,
-          hash: b.hash,
-          nonce: b.nonce
-        }));
-        records.forEach((r: any) => dbPut('blocks', r).catch(()=>{}));
-        return records;
-      }
-    } catch {}
+    // Don't sync from Supabase - blocks should only come from blockchain service
+    // Supabase blocks table is write-only (for published results), not a data source
+    // This was causing re-import during repair, bypassing the lock
     return dbGetAll<any>('blocks');
   },
   getByIndex: async (i: number) => {
